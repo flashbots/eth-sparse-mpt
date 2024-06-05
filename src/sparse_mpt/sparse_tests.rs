@@ -10,6 +10,7 @@ fn print_proofs_trie_nodes() {
 
     let mut branch_node_count = 0;
     let mut extension_node_count = 0;
+    let mut small_branch_nodes_count = 0;
 
     let mut branch_node_min_size = 1000;
     for (_idx, proof) in proofs.into_iter().enumerate() {
@@ -17,8 +18,11 @@ fn print_proofs_trie_nodes() {
         for node in proof.nodes() {
             match &node {
                 TrieNode::Branch(b) => {
-                    branch_node_min_size =
-                        std::cmp::min(branch_node_min_size, b.state_mask.count_ones());
+                    let branch_size = b.state_mask.count_ones();
+                    branch_node_min_size = std::cmp::min(branch_node_min_size, branch_size);
+                    if branch_size == 2 {
+                        small_branch_nodes_count += 1;
+                    }
                     branch_node_count += 1;
                 }
                 TrieNode::Extension(_) => {
@@ -37,6 +41,7 @@ fn print_proofs_trie_nodes() {
         }
     }
     dbg!(branch_node_min_size);
+    dbg!(small_branch_nodes_count);
     dbg!(branch_node_count);
     dbg!(extension_node_count);
 }
@@ -60,7 +65,8 @@ fn test_modify_all_accounts() {
         let mut node_value = match nodes.last() {
             Some(TrieNode::Leaf(leaf)) => leaf.value.clone(),
             _ => {
-                continue;
+                println!("Address is missing from the trie: {:?}", p.address);
+                vec![0x1, 0x2, 0x3]
             }
         };
         for v in &mut node_value {
