@@ -1,8 +1,9 @@
-use crate::sparse_mpt::SparseMPT;
+use crate::sparse_mpt::{DeletionError, NodeNotFound, SparseMPT};
 use crate::utils::{pretty_print_trie_nodes, StoredProof};
 use ahash::HashMap;
-use alloy_primitives::{address, keccak256};
+use alloy_primitives::{address, hex, keccak256};
 use alloy_trie::nodes::TrieNode;
+use alloy_trie::Nibbles;
 
 #[test]
 fn print_proofs_trie_nodes() {
@@ -34,9 +35,9 @@ fn print_proofs_trie_nodes() {
         }
         // if idx == 1 {
         //     pretty_print_trie_nodes(&nodes);
+        //     println!("Address: {:?}, trie_key: {:?}", proof.address, keccak256(proof.address));
         // }
-
-        if proof.address == address!("ce74b79c8eb1ae745d0d377fef3b13d0342a34d1") {
+        if proof.address == address!("ca65eed6554f94c0fe4d94334036fac741a876c2") {
             pretty_print_trie_nodes(&nodes);
         }
     }
@@ -44,6 +45,37 @@ fn print_proofs_trie_nodes() {
     dbg!(small_branch_nodes_count);
     dbg!(branch_node_count);
     dbg!(extension_node_count);
+}
+
+#[test]
+fn test_remove_when_node_is_missing() {
+    let proofs = StoredProof::load_known_proofs();
+
+    let mut trie = SparseMPT::new_empty();
+
+    for proof in proofs {
+        trie.add_sparse_nodes_from_proof(proof.nodes());
+    }
+
+    // path for address 0xca65eed6554f94c0fe4d94334036fac741a876c2 that has 2 branch node above it
+    match trie
+        .delete(&hex!(
+            "c2ce74bf48ecfb02144d03994591dc1d2a137c11fd33e6d6a663403c9bf8b672"
+        ))
+        .unwrap_err()
+    {
+        DeletionError::KeyNotFound => {
+            panic!("incorrect error")
+        }
+        DeletionError::NodeNotFound(NodeNotFound { node, path }) => {
+            // this is info about missing branch
+            assert_eq!(
+                node,
+                hex!("a094a16167027b1e8916726a98d0ec843febf8ec1de56591fcac376fe017affb0d")
+            );
+            assert_eq!(path, Nibbles::from_nibbles(hex!("0c020c0e07040b07")));
+        }
+    }
 }
 
 #[test]

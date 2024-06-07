@@ -369,7 +369,6 @@ proptest! {
     }
 }
 
-
 #[test]
 fn print_trie_example_from_reth() {
     let keys = &[

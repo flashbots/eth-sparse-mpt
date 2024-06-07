@@ -17,12 +17,11 @@ type NodeRef = Vec<u8>;
 #[error("Node not found: {node:?}")]
 pub struct NodeNotFound {
     pub node: NodeRef,
+    pub path: Nibbles,
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum InsertionError {
-    #[error("Unknown branch")]
-    UnknownBranch,
     #[error("Node not found {0}")]
     NodeNotFound(#[from] NodeNotFound),
 }
@@ -39,7 +38,11 @@ pub enum DeletionError {
 enum NodeDeletionResult {
     NodeDeleted,
     NodeUpdated(NodeRef),
-    BranchBelowRemovedWithOneChild { nibble: u8, child: NodeRef },
+    BranchBelowRemovedWithOneChild {
+        nibble: u8,
+        child: NodeRef,
+        child_full_node_path: Nibbles,
+    },
 }
 
 #[derive(Debug)]
@@ -47,8 +50,16 @@ pub struct SparseMPT {
     sparse_original_root: Option<NodeRef>,
     sparse_nodes: HashMap<NodeRef, TrieNode>,
 
+    missing_nodes: HashMap<NodeRef, Nibbles>,
+
     current_root: Option<NodeRef>,
     new_nodes: HashMap<NodeRef, TrieNode>,
+}
+
+fn concat_path(p1: Nibbles, p2: impl AsRef<[u8]>) -> Nibbles {
+    let mut path = p1.clone();
+    path.extend_from_slice_unchecked(p2.as_ref());
+    path
 }
 
 // returns common prefix, suffix for p1, suffix for p2
@@ -112,6 +123,7 @@ impl SparseMPT {
         Self {
             sparse_original_root: None,
             sparse_nodes: HashMap::default(),
+            missing_nodes: Default::default(),
             current_root: None,
             new_nodes: HashMap::default(),
         }
@@ -134,19 +146,27 @@ impl SparseMPT {
         }
     }
 
-    fn get_node(&self, node: &NodeRef) -> Result<TrieNode, NodeNotFound> {
+    pub fn add_sparse_node(&mut self, node: TrieNode) {
+        self.add_new_sparse_node(node);
+    }
+
+    fn get_node(&self, node: &NodeRef, node_path: &Nibbles) -> Result<TrieNode, NodeNotFound> {
         if let Some(node) = self.new_nodes.get(node) {
             return Ok(clone_trie_node(node));
         }
         if let Some(node) = self.sparse_nodes.get(node) {
             return Ok(clone_trie_node(node));
         }
-        Err(NodeNotFound { node: node.clone() })
+        Err(NodeNotFound {
+            node: node.clone(),
+            path: node_path.clone(),
+        })
     }
 
     fn add_new_sparse_node(&mut self, node: TrieNode) -> NodeRef {
         let mut buff = Vec::new();
         let node_ref = node.rlp(&mut buff);
+        self.missing_nodes.remove(&node_ref);
         self.sparse_nodes.insert(node_ref.clone(), node);
         node_ref
     }
@@ -160,12 +180,13 @@ impl SparseMPT {
 
     fn insert_node(
         &mut self,
+        full_node_path: Nibbles,
         path: Nibbles,
         value: Vec<u8>,
         node: Option<&NodeRef>,
     ) -> Result<NodeRef, InsertionError> {
         let node = if let Some(node) = node {
-            self.get_node(node)?
+            self.get_node(node, &full_node_path)?
         } else {
             // inserting into a null node
             let node = TrieNode::Leaf(LeafNode::new(path, value));
@@ -211,8 +232,13 @@ impl SparseMPT {
                 if path.starts_with(&extension.key) {
                     // just pass insertion deeper
                     let remaining_path = Nibbles::from_nibbles(&path[extension.key.len()..]);
-                    let modified_child =
-                        self.insert_node(remaining_path, value, Some(&extension.child))?;
+                    let child_full_path = concat_path(full_node_path, extension.key.as_slice());
+                    let modified_child = self.insert_node(
+                        child_full_path,
+                        remaining_path,
+                        value,
+                        Some(&extension.child),
+                    )?;
                     return Ok(self.add_new_node(TrieNode::Extension(ExtensionNode::new(
                         extension.key,
                         modified_child,
@@ -265,12 +291,17 @@ impl SparseMPT {
                 );
                 let branch_nibble = path[0];
                 let remaining_path = Nibbles::from_nibbles(&path[1..]);
+                let child_full_path = concat_path(full_node_path, &[branch_nibble]);
 
                 let (child_node_ref, vec_idx) =
                     branch_node_get_child_reference(&branch, branch_nibble);
 
-                let modified_child =
-                    self.insert_node(remaining_path, value, child_node_ref.as_ref())?;
+                let modified_child = self.insert_node(
+                    child_full_path,
+                    remaining_path,
+                    value,
+                    child_node_ref.as_ref(),
+                )?;
 
                 let mut new_stack = branch.stack;
                 if branch.state_mask.is_bit_set(branch_nibble) {
@@ -285,12 +316,37 @@ impl SparseMPT {
         };
     }
 
+    fn add_missing_node(&mut self, node_not_found: &NodeNotFound) {
+        match node_not_found {
+            NodeNotFound { node, path } => {
+                if !self.missing_nodes.contains_key(node) {
+                    self.missing_nodes.insert(node.clone(), path.clone());
+                }
+            }
+        }
+    }
+
     pub fn insert(&mut self, key: &[u8], value: &[u8]) -> Result<(), InsertionError> {
         let path = Nibbles::unpack(key);
         let current_head_node = self.current_root.clone();
 
-        self.current_root =
-            Some(self.insert_node(path, value.to_vec(), current_head_node.as_ref())?);
+        let new_root = self
+            .insert_node(
+                Nibbles::new(),
+                path,
+                value.to_vec(),
+                current_head_node.as_ref(),
+            )
+            .map_err(|err| {
+                match &err {
+                    InsertionError::NodeNotFound(not_found) => {
+                        self.add_missing_node(not_found);
+                    }
+                }
+                err
+            })?;
+
+        self.current_root = Some(new_root);
         Ok(())
     }
 
@@ -298,14 +354,33 @@ impl SparseMPT {
         let path = Nibbles::unpack(key);
         let current_head_node = self.current_root.clone();
 
-        match self.delete_node(path, current_head_node.as_ref())? {
+        match self
+            .delete_node(Nibbles::new(), path, current_head_node.as_ref())
+            .map_err(|err| {
+                match &err {
+                    DeletionError::NodeNotFound(not_found) => {
+                        self.add_missing_node(not_found);
+                    }
+                    _ => {}
+                }
+                err
+            })? {
             NodeDeletionResult::NodeUpdated(node) => self.current_root = Some(node),
             NodeDeletionResult::NodeDeleted => {
                 self.current_root = None;
             }
 
-            NodeDeletionResult::BranchBelowRemovedWithOneChild { nibble, child } => {
-                let child_node = self.get_node(&child)?;
+            NodeDeletionResult::BranchBelowRemovedWithOneChild {
+                nibble,
+                child,
+                child_full_node_path,
+            } => {
+                let child_node = self
+                    .get_node(&child, &child_full_node_path)
+                    .map_err(|err| {
+                        self.add_missing_node(&err);
+                        err
+                    })?;
                 let new_node = match child_node {
                     TrieNode::Branch(_) => {
                         // create extension node with the nibble and the child
@@ -337,11 +412,12 @@ impl SparseMPT {
 
     fn delete_node(
         &mut self,
+        full_node_path: Nibbles,
         path: Nibbles,
         node: Option<&NodeRef>,
     ) -> Result<NodeDeletionResult, DeletionError> {
         let node = if let Some(node) = node {
-            self.get_node(node)?
+            self.get_node(node, &full_node_path)?
         } else {
             // deleting from a null node
             return Err(DeletionError::KeyNotFound);
@@ -360,8 +436,10 @@ impl SparseMPT {
                 }
 
                 let remaining_path = Nibbles::from_nibbles(&path[ext.key.len()..]);
+
+                let child_full_path = concat_path(full_node_path, ext.key.as_slice());
                 // pass deletion to a child
-                match self.delete_node(remaining_path, Some(&ext.child))? {
+                match self.delete_node(child_full_path, remaining_path, Some(&ext.child))? {
                     NodeDeletionResult::NodeDeleted => {
                         // Only branch nodes can be children of the extension nodes
                         // to remove branch node in sec trie we must remove all of its children
@@ -377,8 +455,12 @@ impl SparseMPT {
                             self.add_new_node(updated_ext_node),
                         ))
                     }
-                    NodeDeletionResult::BranchBelowRemovedWithOneChild { nibble, child } => {
-                        let child_node = self.get_node(&child)?;
+                    NodeDeletionResult::BranchBelowRemovedWithOneChild {
+                        nibble,
+                        child,
+                        child_full_node_path,
+                    } => {
+                        let child_node = self.get_node(&child, &child_full_node_path)?;
                         return match child_node {
                             TrieNode::Leaf(child_leaf) => {
                                 // we just remove extension node and merge path into leaf
@@ -423,6 +505,8 @@ impl SparseMPT {
 
                 let removing_branch_nibble = path[0];
                 let remaining_path = Nibbles::from_nibbles(&path[1..]);
+                let child_full_path =
+                    concat_path(full_node_path.clone(), &[removing_branch_nibble]);
 
                 let (child_node_ref, vec_idx) =
                     branch_node_get_child_reference(&current_branch, removing_branch_nibble);
@@ -430,7 +514,7 @@ impl SparseMPT {
                 // deleting from a null child
                 let child_node_ref = child_node_ref.ok_or(DeletionError::KeyNotFound)?;
 
-                match self.delete_node(remaining_path, Some(&child_node_ref))? {
+                match self.delete_node(child_full_path, remaining_path, Some(&child_node_ref))? {
                     NodeDeletionResult::NodeUpdated(modified_child) => {
                         let mut new_stack = current_branch.stack;
                         // we are sure that this child is in the branch
@@ -462,10 +546,13 @@ impl SparseMPT {
                                         break;
                                     }
                                 }
+                                let remaining_child_full_node_path =
+                                    concat_path(full_node_path.clone(), &[child_nibble]);
                                 let remaining_child = stack.pop().unwrap();
                                 Ok(NodeDeletionResult::BranchBelowRemovedWithOneChild {
                                     nibble: child_nibble,
                                     child: remaining_child,
+                                    child_full_node_path: remaining_child_full_node_path,
                                 })
                             }
                             2.. => {
@@ -482,8 +569,12 @@ impl SparseMPT {
                             }
                         }
                     }
-                    NodeDeletionResult::BranchBelowRemovedWithOneChild { nibble, child } => {
-                        let child_node = self.get_node(&child)?;
+                    NodeDeletionResult::BranchBelowRemovedWithOneChild {
+                        nibble,
+                        child,
+                        child_full_node_path,
+                    } => {
+                        let child_node = self.get_node(&child, &child_full_node_path)?;
                         let new_child_node = match child_node {
                             TrieNode::Leaf(child_leaf) => {
                                 // merge missing nibble into leaf path
@@ -544,14 +635,16 @@ impl SparseMPT {
 impl SparseMPT {
     fn print_trie(&self) {
         if let Some(root) = &self.current_root {
-            self.print_node(root, 0);
+            self.print_node(Nibbles::new(), root, 0);
         } else {
             println!("Empty trie");
         }
     }
 
-    fn print_node(&self, node: &NodeRef, ident: usize) {
-        let node = self.get_node(node).expect("node not found");
+    fn print_node(&self, full_node_path: Nibbles, node: &NodeRef, ident: usize) {
+        let node = self
+            .get_node(node, &full_node_path)
+            .expect("node not found");
         let ident_str = " ".repeat(ident);
         match node {
             TrieNode::Leaf(leaf) => {
@@ -563,16 +656,18 @@ impl SparseMPT {
                 let key = hex::encode(ext.key.as_ref());
                 println!("{}Extension, path: {}", ident_str, key);
                 println!("{}Extension child:", ident_str);
-                self.print_node(&ext.child, ident + 2);
+                let child_full_path = concat_path(full_node_path.clone(), ext.key.as_slice());
+                self.print_node(child_full_path, &ext.child, ident + 2);
             }
             TrieNode::Branch(branch) => {
                 println!("{}Branch", ident_str);
                 let mut vec_idx = 0;
                 for idx in CHILD_INDEX_RANGE {
                     if branch.state_mask.is_bit_set(idx) {
+                        let child_full_path = concat_path(full_node_path.clone(), &[idx]);
                         let child = &branch.stack[vec_idx];
                         println!("{}Child: {:x}", ident_str, idx);
-                        self.print_node(child, ident + 2);
+                        self.print_node(child_full_path, child, ident + 2);
                         vec_idx += 1;
                     }
                 }
