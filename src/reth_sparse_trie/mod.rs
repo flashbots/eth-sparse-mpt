@@ -1,21 +1,36 @@
+pub mod trie_fetcher;
+
+use crate::reth_sparse_trie::trie_fetcher::TrieFetcher;
 use crate::sparse_mpt::{DeletionError, InsertionError, NodeNotFound, SparseMPT, SparseTrieStore};
 use ahash::HashMap;
 use alloy_primitives::{keccak256, Address, B256, U256};
 use alloy_rlp::Encodable;
 use alloy_trie::Nibbles;
-use eyre::eyre;
+use dashmap::DashSet;
 use reth::primitives::trie::TrieAccount;
+use reth::providers::providers::ConsistentDbView;
+use reth::providers::DatabaseProviderFactory;
 use reth::revm::db::BundleAccount;
 use reth::revm::primitives::AccountInfo;
+use reth::tasks::pool::BlockingTaskPool;
+use reth_db::database::Database;
+use reth_interfaces::db::DatabaseError;
+use reth_interfaces::provider::ProviderResult;
 use std::sync::{Arc, Mutex};
 
-#[derive(Debug, Clone, Default)]
-pub struct RethSparseMPTSharedCache {
+#[derive(Debug, Clone)]
+pub struct RethSparseMPTSharedCache<DB, Provider> {
     state_trie_sparse_store: SparseTrieStore,
     account_tries_sparse_store: Arc<Mutex<HashMap<Address, SparseTrieStore>>>,
+    blocking_task_pool: BlockingTaskPool,
+    consistent_db_view: ConsistentDbView<DB, Provider>,
+    // hashed address path
+    fetched_account_proofs: DashSet<Address, ahash::RandomState>,
+    // (hashed address, path)
+    fetched_storage_proofs: DashSet<(Address, U256), ahash::RandomState>,
 }
 
-impl RethSparseMPTSharedCache {
+impl<DB, Provider> RethSparseMPTSharedCache<DB, Provider> {
     fn get_account_trie_sparse_store(&self, address: Address) -> SparseTrieStore {
         let mut stores = self.account_tries_sparse_store.lock().unwrap();
         stores.entry(address).or_default().clone()
@@ -27,17 +42,95 @@ struct AccountFetchRequest {
     slots: Vec<U256>,
 }
 
-impl RethSparseMPTSharedCache {
-    fn fetch_needed_proofs(&self, accounts: Vec<AccountFetchRequest>) {
-        todo!()
+impl<DB, Provider> RethSparseMPTSharedCache<DB, Provider>
+where
+    DB: Database,
+    Provider: DatabaseProviderFactory<DB>,
+{
+    fn fetch_needed_proofs(&self, accounts: Vec<AccountFetchRequest>) -> ProviderResult<()> {
+        /// TODO: parallel
+        for account in accounts {
+            if self.fetched_account_proofs.contains(&account.account) {
+                continue;
+            }
+
+            let provider = self.consistent_db_view.provider_ro()?;
+
+            let trie_fetcher = TrieFetcher::new(provider.tx_ref());
+
+            let hashed_address = keccak256(account.account);
+            let target = Nibbles::unpack(hashed_address.as_slice());
+
+            let nodes = trie_fetcher
+                .account_proof_path(target)
+                .map_err(DatabaseError::from)?;
+            self.state_trie_sparse_store
+                .add_sparse_nodes_from_raw_proof(nodes);
+            self.fetched_account_proofs.insert(account.account);
+
+            let mut slots = Vec::new();
+            let mut slots_path = Vec::new();
+            for slot in account.slots {
+                if self
+                    .fetched_storage_proofs
+                    .contains(&(account.account, slot))
+                {
+                    continue;
+                }
+                slots.push(slot);
+                slots_path.push(Nibbles::unpack(&keccak256(B256::from(slot)).to_vec()));
+            }
+            if slots.is_empty() {
+                continue;
+            }
+
+            let (_, storage_proofs) =
+                trie_fetcher.storage_proof_paths(hashed_address, &slots_path)?;
+            let account_trie = self.get_account_trie_sparse_store(account.account);
+            account_trie.add_sparse_nodes_from_raw_proof(storage_proofs);
+            for slot in slots {
+                self.fetched_storage_proofs.insert((account.account, slot));
+            }
+        }
+        Ok(())
     }
 
     fn fetch_missing_nodes(
         &self,
         missing_nodes: Vec<NodeNotFound>,
-        missing_account_nodes: Vec<(Vec<u8>, NodeNotFound)>,
-    ) {
-        todo!()
+        missing_account_nodes: Vec<(B256, Vec<NodeNotFound>)>,
+    ) -> ProviderResult<()> {
+        let provider = self.consistent_db_view.provider_ro()?;
+
+        let trie_fetcher = TrieFetcher::new(provider.tx_ref());
+        for NodeNotFound { node, path } in missing_nodes {
+            let proof = trie_fetcher.account_proof_path(path)?;
+            self.state_trie_sparse_store
+                .add_sparse_nodes_from_raw_proof(proof);
+            if !self.state_trie_sparse_store.is_node_exists(&node) {
+                panic!("State trie fetcher failed to get needed node");
+            }
+        }
+
+        for (hashed_address, missing_nodes) in missing_account_nodes {
+            let account_trie = self.get_account_trie_sparse_store(Address::from(hashed_address));
+            let mut slots = Vec::new();
+            let mut node_ref = Vec::new();
+            for NodeNotFound { node, path } in missing_nodes {
+                slots.push(path);
+                node_ref.push(node);
+            }
+
+            let (_, storage_proofs) = trie_fetcher.storage_proof_paths(hashed_address, &slots)?;
+            account_trie.add_sparse_nodes_from_raw_proof(storage_proofs);
+            for node in node_ref {
+                if !account_trie.is_node_exists(&node) {
+                    panic!("Account trie fetcher failed to get needed node");
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -67,7 +160,8 @@ impl RethSparseRootHash {
         for (address, bundle_account) in bundle_accounts {
             let mut fetch_request = AccountFetchRequest {
                 account: *address,
-                slots: vec![],
+                // we always request proof for slot 0 to populate storage trie
+                slots: vec![U256::ZERO],
             };
 
             let mut slot_trie_changes = Vec::new();

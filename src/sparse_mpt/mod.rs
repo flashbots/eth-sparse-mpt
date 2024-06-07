@@ -7,7 +7,7 @@ use crate::utils::clone_trie_node;
 use ahash::HashMap;
 use alloy_primitives::bytes::BytesMut;
 use alloy_primitives::{hex, keccak256, B256};
-use alloy_rlp::Encodable;
+use alloy_rlp::{Decodable, Encodable};
 use alloy_trie::nodes::{BranchNode, ExtensionNode, LeafNode, TrieNode, CHILD_INDEX_RANGE};
 use alloy_trie::{Nibbles, TrieMask, EMPTY_ROOT_HASH};
 use std::sync::{Arc, Mutex};
@@ -71,6 +71,48 @@ impl SparseTrieStore {
                 let mut sparse_original_root = self.sparse_original_root.lock().unwrap();
                 if sparse_original_root.is_none() {
                     *sparse_original_root = Some(reference);
+                }
+            }
+        }
+    }
+
+    pub fn is_node_exists(&self, node: &NodeRef) -> bool {
+        self.sparse_nodes.contains_key(node)
+    }
+
+    pub fn add_sparse_nodes_from_raw_proof(&self, proof_path: Vec<Vec<u8>>) {
+        // used to determine parent node
+        let mut node_link_count = HashMap::default();
+
+        for nodes in proof_path.into_iter() {
+            // @TODO no panics
+            let trie_node = TrieNode::decode(&mut nodes.as_slice()).expect("can't parse trie node");
+            match &trie_node {
+                TrieNode::Branch(branch) => {
+                    for child in branch.stack {
+                        node_link_count
+                            .entry(child.clone())
+                            .and_modify(|count| *count += 1)
+                            .or_insert(1);
+                    }
+                }
+                TrieNode::Extension(ext) => {
+                    node_link_count
+                        .entry(ext.child.clone())
+                        .and_modify(|count| *count += 1)
+                        .or_insert(1);
+                }
+                TrieNode::Leaf(_) => {}
+            }
+            let reference = self.add_new_sparse_node(trie_node);
+            node_link_count.entry(reference).or_default();
+        }
+
+        let mut sparse_original_root = self.sparse_original_root.lock().unwrap();
+        if sparse_original_root.is_none() {
+            for (node, link_count) in node_link_count {
+                if link_count == 0 {
+                    *sparse_original_root = Some(node);
                 }
             }
         }

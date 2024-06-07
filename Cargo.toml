@@ -16,8 +16,8 @@ proptest = "1.4.0"
 
 
 reth = { git = "https://github.com/paradigmxyz/reth", tag = "v0.2.0-beta.6" }
-#reth-db = { git = "https://github.com/paradigmxyz/reth", tag = "v0.2.0-beta.6" }
-#reth-interfaces = { git = "https://github.com/paradigmxyz/reth", tag = "v0.2.0-beta.6" }
+reth-db = { git = "https://github.com/paradigmxyz/reth", tag = "v0.2.0-beta.6" }
+reth-interfaces = { git = "https://github.com/paradigmxyz/reth", tag = "v0.2.0-beta.6" }
 #reth-libmdbx = { git = "https://github.com/paradigmxyz/reth", tag = "v0.2.0-beta.6" }
 #reth-payload-builder = { git = "https://github.com/paradigmxyz/reth", tag = "v0.2.0-beta.6" }
 #reth-node-api = { git = "https://github.com/paradigmxyz/reth", tag = "v0.2.0-beta.6" }
