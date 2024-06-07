@@ -32,6 +32,7 @@ reth-trie = { git = "https://github.com/paradigmxyz/reth", tag = "v0.2.0-beta.6"
 
 alloy-primitives = { version = "0.7.0", features = ["asm-keccak", "serde"] }
 alloy-rlp = "0.3.4"
+dashmap = "5.5.3"
 #alloy-chains = { version = "0.1.15", feature = ["serde", "rlp", "arbitrary"] }
 #alloy-provider = { git = "https://github.com/alloy-rs/alloy", rev = "39b8695" }
 #alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "39b8695" }

@@ -1,4 +1,4 @@
-// @Todo remove modified nodes from the trie
+// @TODO remove modified nodes from the trie
 
 mod basic_tests;
 mod sparse_tests;
@@ -10,6 +10,7 @@ use alloy_primitives::{hex, keccak256, B256};
 use alloy_rlp::Encodable;
 use alloy_trie::nodes::{BranchNode, ExtensionNode, LeafNode, TrieNode, CHILD_INDEX_RANGE};
 use alloy_trie::{Nibbles, TrieMask, EMPTY_ROOT_HASH};
+use std::sync::{Arc, Mutex};
 
 type NodeRef = Vec<u8>;
 
@@ -45,10 +46,60 @@ enum NodeDeletionResult {
     },
 }
 
+// @TODO: we need to distinguish empty and non-initialized sparse trie
+#[derive(Debug, Clone)]
+pub struct SparseTrieStore {
+    sparse_original_root: Arc<Mutex<Option<NodeRef>>>,
+    sparse_nodes: Arc<dashmap::DashMap<NodeRef, TrieNode, ahash::RandomState>>,
+}
+
+impl SparseTrieStore {
+    fn get_root_node(&self) -> Option<NodeRef> {
+        self.sparse_original_root.lock().unwrap().clone()
+    }
+
+    fn get_node(&self, node: &NodeRef) -> Option<TrieNode> {
+        self.sparse_nodes
+            .get(node)
+            .map(|node| clone_trie_node(&node))
+    }
+
+    pub fn add_sparse_nodes_from_proof(&self, proof_path: Vec<TrieNode>) {
+        for (idx, nodes) in proof_path.into_iter().enumerate() {
+            let reference = self.add_new_sparse_node(nodes);
+            if idx == 0 {
+                let mut sparse_original_root = self.sparse_original_root.lock().unwrap();
+                if sparse_original_root.is_none() {
+                    *sparse_original_root = Some(reference);
+                }
+            }
+        }
+    }
+
+    pub fn add_sparse_node(&self, node: TrieNode) {
+        self.add_new_sparse_node(node);
+    }
+
+    fn add_new_sparse_node(&self, node: TrieNode) -> NodeRef {
+        let mut buff = Vec::new();
+        let node_ref = node.rlp(&mut buff);
+        self.sparse_nodes.insert(node_ref.clone(), node);
+        node_ref
+    }
+}
+
+impl Default for SparseTrieStore {
+    fn default() -> Self {
+        Self {
+            sparse_original_root: Arc::new(Mutex::new(None)),
+            sparse_nodes: Arc::new(dashmap::DashMap::default()),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct SparseMPT {
-    sparse_original_root: Option<NodeRef>,
-    sparse_nodes: HashMap<NodeRef, TrieNode>,
+    sparse_trie_store: SparseTrieStore,
 
     missing_nodes: HashMap<NodeRef, Nibbles>,
 
@@ -121,54 +172,39 @@ fn branch_node_get_child_reference(branch: &BranchNode, child: u8) -> (Option<No
 impl SparseMPT {
     pub fn new_empty() -> Self {
         Self {
-            sparse_original_root: None,
-            sparse_nodes: HashMap::default(),
+            sparse_trie_store: SparseTrieStore::default(),
             missing_nodes: Default::default(),
             current_root: None,
             new_nodes: HashMap::default(),
         }
     }
 
-    pub fn clear_changed_nodes(&mut self) {
-        self.new_nodes.clear();
-        self.current_root = self.sparse_original_root.clone();
-    }
-
-    pub fn add_sparse_nodes_from_proof(&mut self, proof_path: Vec<TrieNode>) {
-        for (idx, nodes) in proof_path.into_iter().enumerate() {
-            let reference = self.add_new_sparse_node(nodes);
-            if idx == 0 && self.sparse_original_root.is_none() {
-                self.sparse_original_root = Some(reference);
-                if self.current_root.is_none() {
-                    self.current_root.clone_from(&self.sparse_original_root);
-                }
-            }
+    pub fn with_sparse_store(sparse_trie_store: SparseTrieStore) -> Self {
+        let current_root = sparse_trie_store.get_root_node();
+        Self {
+            sparse_trie_store,
+            missing_nodes: Default::default(),
+            current_root,
+            new_nodes: HashMap::default(),
         }
     }
 
-    pub fn add_sparse_node(&mut self, node: TrieNode) {
-        self.add_new_sparse_node(node);
+    pub fn clear_changed_nodes(&mut self) {
+        self.new_nodes.clear();
+        self.current_root = self.sparse_trie_store.get_root_node();
     }
 
     fn get_node(&self, node: &NodeRef, node_path: &Nibbles) -> Result<TrieNode, NodeNotFound> {
         if let Some(node) = self.new_nodes.get(node) {
             return Ok(clone_trie_node(node));
         }
-        if let Some(node) = self.sparse_nodes.get(node) {
-            return Ok(clone_trie_node(node));
+        if let Some(node) = self.sparse_trie_store.get_node(node) {
+            return Ok(node);
         }
         Err(NodeNotFound {
             node: node.clone(),
             path: node_path.clone(),
         })
-    }
-
-    fn add_new_sparse_node(&mut self, node: TrieNode) -> NodeRef {
-        let mut buff = Vec::new();
-        let node_ref = node.rlp(&mut buff);
-        self.missing_nodes.remove(&node_ref);
-        self.sparse_nodes.insert(node_ref.clone(), node);
-        node_ref
     }
 
     fn add_new_node(&mut self, node: TrieNode) -> NodeRef {
@@ -648,13 +684,11 @@ impl SparseMPT {
         let ident_str = " ".repeat(ident);
         match node {
             TrieNode::Leaf(leaf) => {
-                let key = hex::encode(leaf.key.as_ref());
                 let value = hex::encode(&leaf.value);
-                println!("{}Leaf, path: {}, data:  {}", ident_str, key, value);
+                println!("{}Leaf, path: {:?}, data:  {}", ident_str, leaf.key, value);
             }
             TrieNode::Extension(ext) => {
-                let key = hex::encode(ext.key.as_ref());
-                println!("{}Extension, path: {}", ident_str, key);
+                println!("{}Extension, path: {:?}", ident_str, ext.key);
                 println!("{}Extension child:", ident_str);
                 let child_full_path = concat_path(full_node_path.clone(), ext.key.as_slice());
                 self.print_node(child_full_path, &ext.child, ident + 2);

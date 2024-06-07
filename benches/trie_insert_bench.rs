@@ -1,7 +1,7 @@
 use alloy_primitives::{keccak256, B256, U256};
 use alloy_trie::nodes::TrieNode;
 use criterion::{criterion_group, criterion_main, Criterion};
-use eth_sparse_mpt::sparse_mpt::SparseMPT;
+use eth_sparse_mpt::sparse_mpt::{SparseMPT, SparseTrieStore};
 use eth_sparse_mpt::utils::{clone_trie_node, KeccakHasher, StoredProof};
 
 fn add_elements(keys: &[&[u8]], values: &[&[u8]]) -> B256 {
@@ -36,9 +36,9 @@ fn trie_insert(c: &mut Criterion) {
 }
 
 fn insert_proof(proofs: &Vec<Vec<TrieNode>>) {
-    let mut trie = SparseMPT::new_empty();
+    let mut sparse_trie_store = SparseTrieStore::default();
     for proof in proofs {
-        trie.add_sparse_nodes_from_proof(proof.iter().map(clone_trie_node).collect());
+        sparse_trie_store.add_sparse_nodes_from_proof(proof.iter().map(clone_trie_node).collect());
     }
 }
 
@@ -77,10 +77,11 @@ fn sparse_trie_update(c: &mut Criterion) {
         values.push(node_value);
     }
 
-    let mut trie = SparseMPT::new_empty();
+    let sparse_store = SparseTrieStore::default();
     for proof in proofs.iter() {
-        trie.add_sparse_nodes_from_proof(proof.nodes());
+        sparse_store.add_sparse_nodes_from_proof(proof.nodes());
     }
+    let mut trie = SparseMPT::with_sparse_store(sparse_store);
 
     c.bench_function("update all accounts sparse trie", |b| {
         b.iter(|| {

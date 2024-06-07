@@ -2256,6 +2256,7 @@ dependencies = [
  "alloy-rlp",
  "alloy-trie 0.4.1",
  "criterion",
+ "dashmap",
  "eyre",
  "hash-db",
  "proptest",

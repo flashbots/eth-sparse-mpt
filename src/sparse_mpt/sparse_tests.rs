@@ -1,4 +1,4 @@
-use crate::sparse_mpt::{DeletionError, NodeNotFound, SparseMPT};
+use crate::sparse_mpt::{DeletionError, NodeNotFound, SparseMPT, SparseTrieStore};
 use crate::utils::{pretty_print_trie_nodes, StoredProof};
 use ahash::HashMap;
 use alloy_primitives::{address, hex, keccak256};
@@ -51,11 +51,12 @@ fn print_proofs_trie_nodes() {
 fn test_remove_when_node_is_missing() {
     let proofs = StoredProof::load_known_proofs();
 
-    let mut trie = SparseMPT::new_empty();
-
+    let sparse_store = SparseTrieStore::default();
     for proof in proofs {
-        trie.add_sparse_nodes_from_proof(proof.nodes());
+        sparse_store.add_sparse_nodes_from_proof(proof.nodes());
     }
+
+    let mut trie = SparseMPT::with_sparse_store(sparse_store.clone());
 
     // path for address 0xca65eed6554f94c0fe4d94334036fac741a876c2 that has 2 branch node above it
     match trie
@@ -81,7 +82,8 @@ fn test_remove_when_node_is_missing() {
 #[test]
 fn test_modify_all_accounts() {
     let proofs = StoredProof::load_known_proofs();
-    let mut trie = SparseMPT::new_empty();
+
+    let sparse_store = SparseTrieStore::default();
 
     let mut rev_key = HashMap::default();
 
@@ -107,8 +109,10 @@ fn test_modify_all_accounts() {
         keys.push(hashed_address.clone());
         values.push(node_value);
 
-        trie.add_sparse_nodes_from_proof(nodes);
+        sparse_store.add_sparse_nodes_from_proof(nodes);
     }
+
+    let mut trie = SparseMPT::with_sparse_store(sparse_store.clone());
 
     println!("Total keys: {}", keys.len());
 
