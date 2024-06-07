@@ -368,3 +368,22 @@ proptest! {
         compare_with_removals(&data, &keys_to_remove, false).unwrap()
     }
 }
+
+
+#[test]
+fn print_trie_example_from_reth() {
+    let keys = &[
+        hex!("30af561000000000000000000000000000000000000000000000000000000000").to_vec(),
+        hex!("30af569000000000000000000000000000000000000000000000000000000000").to_vec(),
+        hex!("30af650000000000000000000000000000000000000000000000000000000000").to_vec(),
+        hex!("30af6f0000000000000000000000000000000000000000000000000000000000").to_vec(),
+        hex!("30af8f0000000000000000000000000000000000000000000000000000000000").to_vec(),
+        hex!("3100000000000000000000000000000000000000000000000000000000000000").to_vec(),
+    ];
+
+    let mut trie = SparseMPT::new_empty();
+    for (idx, key) in keys.iter().enumerate() {
+        trie.insert(&key, &[idx as u8]).expect("insertion failed");
+    }
+    trie.print_trie();
+}
