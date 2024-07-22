@@ -89,7 +89,7 @@ impl SparseTrieStore {
             let trie_node = TrieNode::decode(&mut nodes.as_slice()).expect("can't parse trie node");
             match &trie_node {
                 TrieNode::Branch(branch) => {
-                    for child in branch.stack {
+                    for child in &branch.stack {
                         node_link_count
                             .entry(child.clone())
                             .and_modify(|count| *count += 1)
