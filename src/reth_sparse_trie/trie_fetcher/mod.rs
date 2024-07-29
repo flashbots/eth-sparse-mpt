@@ -1,3 +1,5 @@
+mod toy_trie_tests;
+
 /// Copied form reth `Proof` and modified to fetch all nodes for some path
 use alloy_rlp::{BufMut, Encodable};
 use reth::primitives::{

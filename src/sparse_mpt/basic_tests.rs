@@ -1,13 +1,9 @@
-use crate::sparse_mpt::{DeletionError, SparseMPT};
-use crate::utils::KeccakHasher;
+use crate::sparse_mpt::{SparseMPT, SparseTrieError};
+use crate::utils::reference_trie_hash;
 use ahash::HashSet;
-use alloy_primitives::{hex, B256};
+use alloy_primitives::hex;
 use proptest::prelude::any;
 use proptest::proptest;
-
-fn reference_trie_hash(data: &[(Vec<u8>, Vec<u8>)]) -> B256 {
-    triehash::trie_root::<KeccakHasher, _, _, _>(data.to_vec())
-}
 
 fn compare_impls(data: &[(Vec<u8>, Vec<u8>)]) {
     let expected = reference_trie_hash(data);
@@ -118,7 +114,7 @@ fn compare_with_removals(
     data: &[(Vec<u8>, Vec<u8>)],
     remove: &[Vec<u8>],
     print: bool,
-) -> Result<(), DeletionError> {
+) -> Result<(), SparseTrieError> {
     let removed_keys: HashSet<_> = remove.iter().cloned().collect();
     let filtered_data: Vec<_> = data
         .iter()

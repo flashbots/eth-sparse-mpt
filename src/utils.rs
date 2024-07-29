@@ -16,6 +16,10 @@ impl hash_db::Hasher for KeccakHasher {
     }
 }
 
+pub fn reference_trie_hash(data: &[(Vec<u8>, Vec<u8>)]) -> B256 {
+    triehash::trie_root::<KeccakHasher, _, _, _>(data.to_vec())
+}
+
 pub fn pretty_print_trie_nodes(nodes: &[TrieNode]) {
     println!("=== BEGIN ===");
     for node in nodes {

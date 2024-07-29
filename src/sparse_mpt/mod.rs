@@ -4,7 +4,7 @@ mod basic_tests;
 mod sparse_tests;
 
 use crate::utils::clone_trie_node;
-use ahash::HashMap;
+use ahash::{HashMap, HashSet};
 use alloy_primitives::bytes::BytesMut;
 use alloy_primitives::{hex, keccak256, B256};
 use alloy_rlp::{Decodable, Encodable};
@@ -21,20 +21,6 @@ pub struct NodeNotFound {
     pub path: Nibbles,
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum InsertionError {
-    #[error("Node not found {0}")]
-    NodeNotFound(#[from] NodeNotFound),
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum DeletionError {
-    #[error("Key node found")]
-    KeyNotFound,
-    #[error("Node not found {0}")]
-    NodeNotFound(#[from] NodeNotFound),
-}
-
 #[derive(Debug)]
 enum NodeDeletionResult {
     NodeDeleted,
@@ -46,41 +32,101 @@ enum NodeDeletionResult {
     },
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum SparseTrieError {
+    #[error("Sparse store not initialised")]
+    SparseStoreNotInitialised,
+    #[error("Key node found when deleting")]
+    KeyNotFound,
+    #[error("Node not found {0}")]
+    NodeNotFound(#[from] NodeNotFound),
+}
+
+#[derive(Debug)]
+struct SparseTrieStoreInner {
+    is_initialised: bool,
+    sparse_original_root: Option<NodeRef>,
+    sparse_nodes: HashMap<NodeRef, TrieNode>,
+    leaf_paths_added: HashSet<Nibbles>,
+}
+
 // @TODO: we need to distinguish empty and non-initialized sparse trie
 #[derive(Debug, Clone)]
 pub struct SparseTrieStore {
-    sparse_original_root: Arc<Mutex<Option<NodeRef>>>,
-    sparse_nodes: Arc<dashmap::DashMap<NodeRef, TrieNode, ahash::RandomState>>,
+    inner: Arc<Mutex<SparseTrieStoreInner>>,
 }
 
 impl SparseTrieStore {
-    fn get_root_node(&self) -> Option<NodeRef> {
-        self.sparse_original_root.lock().unwrap().clone()
+    pub fn new() -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(SparseTrieStoreInner {
+                is_initialised: false,
+                sparse_original_root: None,
+                sparse_nodes: HashMap::default(),
+                leaf_paths_added: HashSet::default(),
+            })),
+        }
     }
 
-    fn get_node(&self, node: &NodeRef) -> Option<TrieNode> {
-        self.sparse_nodes
+    /// Create empty sparse trie, this should be used when sure that the trie is empty
+    pub fn new_empty() -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(SparseTrieStoreInner {
+                is_initialised: true,
+                sparse_original_root: None,
+                sparse_nodes: HashMap::default(),
+                leaf_paths_added: HashSet::default(),
+            })),
+        }
+    }
+
+    pub fn new_from_proof(proof_path: Vec<Vec<u8>>, leaf_paths: Vec<Nibbles>) -> Self {
+        let store = Self::new_empty();
+        store.add_sparse_nodes_from_raw_proof(proof_path, leaf_paths);
+        store
+    }
+
+    pub fn is_initialised(&self) -> bool {
+        self.inner.lock().unwrap().is_initialised
+    }
+
+    fn get_root_node(&self) -> Result<Option<NodeRef>, SparseTrieError> {
+        let inner = self.inner.lock().unwrap();
+        if !inner.is_initialised {
+            return Err(SparseTrieError::SparseStoreNotInitialised);
+        }
+        Ok(inner.sparse_original_root.clone())
+    }
+
+    fn get_node(&self, node: &NodeRef) -> Result<Option<TrieNode>, SparseTrieError> {
+        let inner = self.inner.lock().unwrap();
+        if !inner.is_initialised {
+            return Err(SparseTrieError::SparseStoreNotInitialised);
+        }
+        Ok(inner
+            .sparse_nodes
             .get(node)
-            .map(|node| clone_trie_node(&node))
+            .map(|node| clone_trie_node(node)))
     }
 
-    pub fn add_sparse_nodes_from_proof(&self, proof_path: Vec<TrieNode>) {
+    fn add_sparse_nodes_from_proof(&self, proof_path: Vec<TrieNode>) {
         for (idx, nodes) in proof_path.into_iter().enumerate() {
             let reference = self.add_new_sparse_node(nodes);
             if idx == 0 {
-                let mut sparse_original_root = self.sparse_original_root.lock().unwrap();
-                if sparse_original_root.is_none() {
-                    *sparse_original_root = Some(reference);
+                let mut inner = self.inner.lock().unwrap();
+                if inner.sparse_original_root.is_none() {
+                    inner.sparse_original_root = Some(reference);
                 }
+                inner.is_initialised = true;
             }
         }
     }
 
-    pub fn is_node_exists(&self, node: &NodeRef) -> bool {
-        self.sparse_nodes.contains_key(node)
-    }
-
-    pub fn add_sparse_nodes_from_raw_proof(&self, proof_path: Vec<Vec<u8>>) {
+    pub fn add_sparse_nodes_from_raw_proof(
+        &self,
+        proof_path: Vec<Vec<u8>>,
+        leaf_paths: Vec<Nibbles>,
+    ) {
         // used to determine parent node
         let mut node_link_count = HashMap::default();
 
@@ -104,46 +150,50 @@ impl SparseTrieStore {
                 }
                 TrieNode::Leaf(_) => {}
             }
+            // TODO: better take lock for the whole function
             let reference = self.add_new_sparse_node(trie_node);
             node_link_count.entry(reference).or_default();
         }
 
-        let mut sparse_original_root = self.sparse_original_root.lock().unwrap();
-        if sparse_original_root.is_none() {
+        let mut inner = self.inner.lock().unwrap();
+        if inner.sparse_original_root.is_none() {
             for (node, link_count) in node_link_count {
                 if link_count == 0 {
-                    *sparse_original_root = Some(node);
+                    inner.sparse_original_root = Some(node);
                 }
             }
         }
+        for path in leaf_paths {
+            inner.leaf_paths_added.insert(path);
+        }
+        inner.is_initialised = true;
     }
 
-    pub fn add_sparse_node(&self, node: TrieNode) {
+    pub fn get_unfetched_leafs(&self, leafs_paths: &[Nibbles]) -> Vec<Nibbles> {
+        let inner = self.inner.lock().unwrap();
+        leafs_paths
+            .iter()
+            .filter(|path| !inner.leaf_paths_added.contains(*path))
+            .cloned()
+            .collect()
+    }
+
+    fn add_sparse_node(&self, node: TrieNode) {
         self.add_new_sparse_node(node);
     }
 
     fn add_new_sparse_node(&self, node: TrieNode) -> NodeRef {
         let mut buff = Vec::new();
         let node_ref = node.rlp(&mut buff);
-        self.sparse_nodes.insert(node_ref.clone(), node);
+        let mut inner = self.inner.lock().unwrap();
+        inner.sparse_nodes.insert(node_ref.clone(), node);
         node_ref
-    }
-}
-
-impl Default for SparseTrieStore {
-    fn default() -> Self {
-        Self {
-            sparse_original_root: Arc::new(Mutex::new(None)),
-            sparse_nodes: Arc::new(dashmap::DashMap::default()),
-        }
     }
 }
 
 #[derive(Debug)]
 pub struct SparseMPT {
     sparse_trie_store: SparseTrieStore,
-
-    missing_nodes: HashMap<NodeRef, Nibbles>,
 
     current_root: Option<NodeRef>,
     new_nodes: HashMap<NodeRef, TrieNode>,
@@ -214,39 +264,40 @@ fn branch_node_get_child_reference(branch: &BranchNode, child: u8) -> (Option<No
 impl SparseMPT {
     pub fn new_empty() -> Self {
         Self {
-            sparse_trie_store: SparseTrieStore::default(),
-            missing_nodes: Default::default(),
+            sparse_trie_store: SparseTrieStore::new_empty(),
             current_root: None,
             new_nodes: HashMap::default(),
         }
     }
 
-    pub fn with_sparse_store(sparse_trie_store: SparseTrieStore) -> Self {
-        let current_root = sparse_trie_store.get_root_node();
-        Self {
+    pub fn with_sparse_store(sparse_trie_store: SparseTrieStore) -> Result<Self, SparseTrieError> {
+        let current_root = sparse_trie_store.get_root_node()?;
+        Ok(Self {
             sparse_trie_store,
-            missing_nodes: Default::default(),
             current_root,
             new_nodes: HashMap::default(),
-        }
+        })
     }
 
     pub fn clear_changed_nodes(&mut self) {
         self.new_nodes.clear();
-        self.current_root = self.sparse_trie_store.get_root_node();
+        self.current_root = self
+            .sparse_trie_store
+            .get_root_node()
+            .expect("can't create with uninit sparse store");
     }
 
-    fn get_node(&self, node: &NodeRef, node_path: &Nibbles) -> Result<TrieNode, NodeNotFound> {
+    fn get_node(&self, node: &NodeRef, node_path: &Nibbles) -> Result<TrieNode, SparseTrieError> {
         if let Some(node) = self.new_nodes.get(node) {
             return Ok(clone_trie_node(node));
         }
-        if let Some(node) = self.sparse_trie_store.get_node(node) {
+        if let Some(node) = self.sparse_trie_store.get_node(node)? {
             return Ok(node);
         }
-        Err(NodeNotFound {
+        Err(SparseTrieError::NodeNotFound(NodeNotFound {
             node: node.clone(),
             path: node_path.clone(),
-        })
+        }))
     }
 
     fn add_new_node(&mut self, node: TrieNode) -> NodeRef {
@@ -262,7 +313,7 @@ impl SparseMPT {
         path: Nibbles,
         value: Vec<u8>,
         node: Option<&NodeRef>,
-    ) -> Result<NodeRef, InsertionError> {
+    ) -> Result<NodeRef, SparseTrieError> {
         let node = if let Some(node) = node {
             self.get_node(node, &full_node_path)?
         } else {
@@ -394,55 +445,26 @@ impl SparseMPT {
         };
     }
 
-    fn add_missing_node(&mut self, node_not_found: &NodeNotFound) {
-        match node_not_found {
-            NodeNotFound { node, path } => {
-                if !self.missing_nodes.contains_key(node) {
-                    self.missing_nodes.insert(node.clone(), path.clone());
-                }
-            }
-        }
-    }
-
-    pub fn insert(&mut self, key: &[u8], value: &[u8]) -> Result<(), InsertionError> {
+    pub fn insert(&mut self, key: &[u8], value: &[u8]) -> Result<(), SparseTrieError> {
         let path = Nibbles::unpack(key);
         let current_head_node = self.current_root.clone();
 
-        let new_root = self
-            .insert_node(
-                Nibbles::new(),
-                path,
-                value.to_vec(),
-                current_head_node.as_ref(),
-            )
-            .map_err(|err| {
-                match &err {
-                    InsertionError::NodeNotFound(not_found) => {
-                        self.add_missing_node(not_found);
-                    }
-                }
-                err
-            })?;
+        let new_root = self.insert_node(
+            Nibbles::new(),
+            path,
+            value.to_vec(),
+            current_head_node.as_ref(),
+        )?;
 
         self.current_root = Some(new_root);
         Ok(())
     }
 
-    pub fn delete(&mut self, key: &[u8]) -> Result<(), DeletionError> {
+    pub fn delete(&mut self, key: &[u8]) -> Result<(), SparseTrieError> {
         let path = Nibbles::unpack(key);
         let current_head_node = self.current_root.clone();
 
-        match self
-            .delete_node(Nibbles::new(), path, current_head_node.as_ref())
-            .map_err(|err| {
-                match &err {
-                    DeletionError::NodeNotFound(not_found) => {
-                        self.add_missing_node(not_found);
-                    }
-                    _ => {}
-                }
-                err
-            })? {
+        match self.delete_node(Nibbles::new(), path, current_head_node.as_ref())? {
             NodeDeletionResult::NodeUpdated(node) => self.current_root = Some(node),
             NodeDeletionResult::NodeDeleted => {
                 self.current_root = None;
@@ -453,12 +475,7 @@ impl SparseMPT {
                 child,
                 child_full_node_path,
             } => {
-                let child_node = self
-                    .get_node(&child, &child_full_node_path)
-                    .map_err(|err| {
-                        self.add_missing_node(&err);
-                        err
-                    })?;
+                let child_node = self.get_node(&child, &child_full_node_path)?;
                 let new_node = match child_node {
                     TrieNode::Branch(_) => {
                         // create extension node with the nibble and the child
@@ -493,24 +510,24 @@ impl SparseMPT {
         full_node_path: Nibbles,
         path: Nibbles,
         node: Option<&NodeRef>,
-    ) -> Result<NodeDeletionResult, DeletionError> {
+    ) -> Result<NodeDeletionResult, SparseTrieError> {
         let node = if let Some(node) = node {
             self.get_node(node, &full_node_path)?
         } else {
             // deleting from a null node
-            return Err(DeletionError::KeyNotFound);
+            return Err(SparseTrieError::KeyNotFound);
         };
 
         match node {
             TrieNode::Leaf(leaf) => {
                 if leaf.key != path {
-                    return Err(DeletionError::KeyNotFound);
+                    return Err(SparseTrieError::KeyNotFound);
                 }
                 Ok(NodeDeletionResult::NodeDeleted)
             }
             TrieNode::Extension(ext) => {
                 if !path.starts_with(&ext.key) {
-                    return Err(DeletionError::KeyNotFound);
+                    return Err(SparseTrieError::KeyNotFound);
                 }
 
                 let remaining_path = Nibbles::from_nibbles(&path[ext.key.len()..]);
@@ -578,7 +595,7 @@ impl SparseMPT {
             }
             TrieNode::Branch(current_branch) => {
                 if path.is_empty() {
-                    return Err(DeletionError::KeyNotFound);
+                    return Err(SparseTrieError::KeyNotFound);
                 }
 
                 let removing_branch_nibble = path[0];
@@ -590,7 +607,7 @@ impl SparseMPT {
                     branch_node_get_child_reference(&current_branch, removing_branch_nibble);
 
                 // deleting from a null child
-                let child_node_ref = child_node_ref.ok_or(DeletionError::KeyNotFound)?;
+                let child_node_ref = child_node_ref.ok_or(SparseTrieError::KeyNotFound)?;
 
                 match self.delete_node(child_full_path, remaining_path, Some(&child_node_ref))? {
                     NodeDeletionResult::NodeUpdated(modified_child) => {

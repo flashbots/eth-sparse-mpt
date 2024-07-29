@@ -1,4 +1,4 @@
-use crate::sparse_mpt::{DeletionError, NodeNotFound, SparseMPT, SparseTrieStore};
+use crate::sparse_mpt::{NodeNotFound, SparseMPT, SparseTrieError, SparseTrieStore};
 use crate::utils::{pretty_print_trie_nodes, StoredProof};
 use ahash::HashMap;
 use alloy_primitives::{address, hex, keccak256};
@@ -51,12 +51,12 @@ fn print_proofs_trie_nodes() {
 fn test_remove_when_node_is_missing() {
     let proofs = StoredProof::load_known_proofs();
 
-    let sparse_store = SparseTrieStore::default();
+    let sparse_store = SparseTrieStore::new_empty();
     for proof in proofs {
         sparse_store.add_sparse_nodes_from_proof(proof.nodes());
     }
 
-    let mut trie = SparseMPT::with_sparse_store(sparse_store.clone());
+    let mut trie = SparseMPT::with_sparse_store(sparse_store.clone()).unwrap();
 
     // path for address 0xca65eed6554f94c0fe4d94334036fac741a876c2 that has 2 branch node above it
     match trie
@@ -65,16 +65,16 @@ fn test_remove_when_node_is_missing() {
         ))
         .unwrap_err()
     {
-        DeletionError::KeyNotFound => {
-            panic!("incorrect error")
-        }
-        DeletionError::NodeNotFound(NodeNotFound { node, path }) => {
+        SparseTrieError::NodeNotFound(NodeNotFound { node, path }) => {
             // this is info about missing branch
             assert_eq!(
                 node,
                 hex!("a094a16167027b1e8916726a98d0ec843febf8ec1de56591fcac376fe017affb0d")
             );
             assert_eq!(path, Nibbles::from_nibbles(hex!("0c020c0e07040b07")));
+        }
+        _ => {
+            panic!("incorrect error")
         }
     }
 }
@@ -83,7 +83,7 @@ fn test_remove_when_node_is_missing() {
 fn test_modify_all_accounts() {
     let proofs = StoredProof::load_known_proofs();
 
-    let sparse_store = SparseTrieStore::default();
+    let sparse_store = SparseTrieStore::new_empty();
 
     let mut rev_key = HashMap::default();
 
@@ -112,7 +112,7 @@ fn test_modify_all_accounts() {
         sparse_store.add_sparse_nodes_from_proof(nodes);
     }
 
-    let mut trie = SparseMPT::with_sparse_store(sparse_store.clone());
+    let mut trie = SparseMPT::with_sparse_store(sparse_store.clone()).unwrap();
 
     println!("Total keys: {}", keys.len());
 
