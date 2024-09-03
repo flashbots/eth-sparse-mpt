@@ -6,7 +6,6 @@ use alloy_primitives::{hex, keccak256, B256, U256};
 use alloy_rlp::{Decodable, Encodable};
 use alloy_trie::nodes::TrieNode;
 use alloy_trie::{HashBuilder, Nibbles, EMPTY_ROOT_HASH};
-use reth::primitives::trie::TrieAccount;
 use reth::primitives::{Account, StorageEntry};
 use reth::providers::test_utils::create_test_provider_factory;
 use reth::providers::ProviderFactory;
@@ -14,7 +13,7 @@ use reth_db::cursor::DbCursorRW;
 use reth_db::database::Database;
 use reth_db::tables;
 use reth_db::transaction::DbTxMut;
-use reth_trie::{StateRoot, StorageRoot};
+use reth_trie::{StateRoot, StorageRoot, TrieAccount};
 
 #[derive(Debug)]
 struct ToyTrieAccount {
@@ -144,7 +143,7 @@ fn create_toy_trie<DB: Database>(provider_factory: ProviderFactory<DB>) -> B256 
     }
 
     let (root_hash, updates) = StateRoot::from_tx(tx.tx_ref()).root_with_updates().unwrap();
-    updates.flush(tx.tx_ref()).unwrap();
+    updates.write_to_database(tx.tx_ref()).unwrap();
 
     tx.commit().unwrap();
     root_hash
@@ -185,8 +184,8 @@ fn test_print_toy_trie() {
     let hashed_address = B256::new(hex!(
         "30af561000000000000000000000000000000000000000000000000000000000"
     ));
-    //
-    // let target = Nibbles::unpack(hashed_address);
+    
+    let target = Nibbles::unpack(hashed_address);
     // let path = trie_fetcher.account_proof_path(target).unwrap();
     // print_path(&path);
 
@@ -194,10 +193,10 @@ fn test_print_toy_trie() {
         "1000000000000000000000000000000000000000000000000000000000000000"
     ));
 
-    let (_, path) = trie_fetcher
-        .storage_proof_paths(hashed_address, &[slot1])
-        .unwrap();
-    print_path(&path);
+    // let (_, path) = trie_fetcher
+    //     .storage_proof_paths(hashed_address, &[slot1])
+    //     .unwrap();
+    // print_path(&path);
 }
 
 fn print_path(path: &[Vec<u8>]) {

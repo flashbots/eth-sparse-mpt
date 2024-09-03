@@ -3,7 +3,6 @@
 mod basic_tests;
 mod sparse_tests;
 
-use crate::utils::clone_trie_node;
 use ahash::{HashMap, HashSet};
 use alloy_primitives::bytes::BytesMut;
 use alloy_primitives::{hex, keccak256, B256};
@@ -105,8 +104,7 @@ impl SparseTrieStore {
         }
         Ok(inner
             .sparse_nodes
-            .get(node)
-            .map(|node| clone_trie_node(node)))
+            .get(node).cloned())
     }
 
     fn add_sparse_nodes_from_proof(&self, proof_path: Vec<TrieNode>) {
@@ -133,6 +131,7 @@ impl SparseTrieStore {
         for nodes in proof_path.into_iter() {
             // @TODO no panics
             let trie_node = TrieNode::decode(&mut nodes.as_slice()).expect("can't parse trie node");
+	    
             match &trie_node {
                 TrieNode::Branch(branch) => {
                     for child in &branch.stack {
@@ -289,7 +288,7 @@ impl SparseMPT {
 
     fn get_node(&self, node: &NodeRef, node_path: &Nibbles) -> Result<TrieNode, SparseTrieError> {
         if let Some(node) = self.new_nodes.get(node) {
-            return Ok(clone_trie_node(node));
+            return Ok(node.clone());
         }
         if let Some(node) = self.sparse_trie_store.get_node(node)? {
             return Ok(node);

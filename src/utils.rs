@@ -47,20 +47,3 @@ impl StoredProof {
         serde_json::from_str(data).expect("failed to load proofs.json")
     }
 }
-
-pub fn clone_trie_node(node: &TrieNode) -> TrieNode {
-    match node {
-        TrieNode::Branch(branch) => TrieNode::Branch(BranchNode {
-            stack: branch.stack.clone(),
-            state_mask: branch.state_mask,
-        }),
-        TrieNode::Extension(extension) => TrieNode::Extension(ExtensionNode {
-            key: extension.key.clone(),
-            child: extension.child.clone(),
-        }),
-        TrieNode::Leaf(leaf) => TrieNode::Leaf(LeafNode {
-            key: leaf.key.clone(),
-            value: leaf.value.clone(),
-        }),
-    }
-}
