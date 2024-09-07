@@ -102,9 +102,7 @@ impl SparseTrieStore {
         if !inner.is_initialised {
             return Err(SparseTrieError::SparseStoreNotInitialised);
         }
-        Ok(inner
-            .sparse_nodes
-            .get(node).cloned())
+        Ok(inner.sparse_nodes.get(node).cloned())
     }
 
     fn add_sparse_nodes_from_proof(&self, proof_path: Vec<TrieNode>) {
@@ -131,7 +129,7 @@ impl SparseTrieStore {
         for nodes in proof_path.into_iter() {
             // @TODO no panics
             let trie_node = TrieNode::decode(&mut nodes.as_slice()).expect("can't parse trie node");
-	    
+
             match &trie_node {
                 TrieNode::Branch(branch) => {
                     for child in &branch.stack {

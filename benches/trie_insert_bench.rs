@@ -1,6 +1,7 @@
-use alloy_primitives::{keccak256, B256, U256};
+use alloy_primitives::{keccak256, B256, U256, Bytes};
 use alloy_trie::nodes::TrieNode;
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use eth_sparse_mpt::neo_sparse_mpt::SparseTrieNodes;
 use eth_sparse_mpt::sparse_mpt::{SparseMPT, SparseTrieStore};
 use eth_sparse_mpt::utils::{KeccakHasher, StoredProof};
 
@@ -15,6 +16,54 @@ fn add_elements_sparse_trie(keys: &[&[u8]], values: &[&[u8]]) -> B256 {
     }
     trie.root_hash()
 }
+
+fn add_elements_only_neo_sparse_trie(keys: &[Bytes], values: &[Bytes]) {
+    let mut trie = SparseTrieNodes::empty_trie();
+    for (key, value) in keys.iter().zip(values.iter()) {
+        trie.insert_or_update(key.clone(), value.clone()).expect("can't insert");
+    }
+}
+
+fn add_elements_only_neo_sparse_trie_insert_and_hash(keys: &[Bytes], values: &[Bytes]) -> B256 {
+    let mut trie = SparseTrieNodes::empty_trie();
+    for (key, value) in keys.iter().zip(values.iter()) {
+        trie.insert_or_update(key.clone(), value.clone()).expect("can't insert");
+    }
+    trie.hash_seq().expect("must hash")
+}
+
+fn neo_trie_insert_only(c: &mut Criterion) {
+    let mut keys = Vec::new();
+    let mut values = Vec::new();
+    for i in 0u64..3000 {
+        let b: B256 = U256::from(i).into();
+        let data = keccak256(b).to_vec();
+        keys.push(data.clone());
+        values.push(data.clone());
+    }
+    let input_keys = keys.iter().map(|x| Bytes::from(x.as_slice().to_vec())).collect::<Vec<_>>();
+    let input_values = values.iter().map(|x| Bytes::from(x.as_slice().to_vec())).collect::<Vec<_>>();
+    c.bench_function("neo trie 3000 elements insert only", |b| {
+        b.iter(|| add_elements_only_neo_sparse_trie(&input_keys, &input_values))
+    });
+}
+
+fn neo_trie_insert_and_hash(c: &mut Criterion) {
+    let mut keys = Vec::new();
+    let mut values = Vec::new();
+    for i in 0u64..3000 {
+        let b: B256 = U256::from(i).into();
+        let data = keccak256(b).to_vec();
+        keys.push(data.clone());
+        values.push(data.clone());
+    }
+    let input_keys = keys.iter().map(|x| Bytes::from(x.as_slice().to_vec())).collect::<Vec<_>>();
+    let input_values = values.iter().map(|x| Bytes::from(x.as_slice().to_vec())).collect::<Vec<_>>();
+    c.bench_function("neo trie 3000 elements insert and hash", |b| {
+        b.iter(|| add_elements_only_neo_sparse_trie_insert_and_hash(&input_keys, &input_values))
+    });
+}
+
 
 fn trie_insert(c: &mut Criterion) {
     let mut keys = Vec::new();
@@ -52,6 +101,51 @@ fn proof_insert(c: &mut Criterion) {
     c.bench_function("insert all account proofs into sparse trie", |b| {
         b.iter(|| insert_proof(&proof_paths))
     });
+}
+
+fn hashing(c: &mut Criterion) {
+    let size = 3000;
+    let mut data = Vec::new();
+    for _ in 0..size {
+        data.push(B256::random());
+    }
+
+    let mut hash_cache = ahash::HashMap::default();
+
+    c.bench_function(&format!("hashing_{}_elements", size), |b| {
+        b.iter(|| {
+            for d in data.iter() {
+                let hash = keccak256(d);
+                black_box(hash);
+            }
+        })
+    });
+
+    c.bench_function(&format!("hashing_{}_elements_with_cache", size), |b| {
+        b.iter(|| {
+            for d in data.iter() {
+                let hash = hash_cache.entry(d).or_insert_with(|| keccak256(d));
+                black_box(hash);
+            }
+        })
+    });
+}
+
+fn cloning(c: &mut Criterion) {
+    let size = 3000;
+    let mut data = Vec::new();
+    for _ in 0..size {
+        data.push(vec![B256::random(); 16]);
+    }
+
+    c.bench_function(
+        &format!("cloning_{}_branch_trie_size_elements", size),
+        |b| {
+            b.iter(|| {
+                black_box(data.clone());
+            })
+        },
+    );
 }
 
 fn sparse_trie_update(c: &mut Criterion) {
@@ -94,5 +188,14 @@ fn sparse_trie_update(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, sparse_trie_update, proof_insert, trie_insert);
+criterion_group!(
+    benches,
+    // sparse_trie_update,
+    // proof_insert,
+    // trie_insert,
+    // hashing,
+    // cloning,
+    neo_trie_insert_only,
+    // neo_trie_insert_and_hash,
+);
 criterion_main!(benches);

@@ -9,11 +9,13 @@ use alloy_trie::{HashBuilder, Nibbles, EMPTY_ROOT_HASH};
 use reth::primitives::{Account, StorageEntry};
 use reth::providers::test_utils::create_test_provider_factory;
 use reth::providers::ProviderFactory;
+use reth::providers::TrieWriter;
 use reth_db::cursor::DbCursorRW;
 use reth_db::database::Database;
 use reth_db::tables;
 use reth_db::transaction::DbTxMut;
 use reth_trie::{StateRoot, StorageRoot, TrieAccount};
+use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 
 #[derive(Debug)]
 struct ToyTrieAccount {
@@ -142,10 +144,18 @@ fn create_toy_trie<DB: Database>(provider_factory: ProviderFactory<DB>) -> B256 
         // StorageRoot::new()
     }
 
-    let (root_hash, updates) = StateRoot::from_tx(tx.tx_ref()).root_with_updates().unwrap();
-    updates.write_to_database(tx.tx_ref()).unwrap();
+    let (root_hash, updates) = StateRoot::new(
+        DatabaseTrieCursorFactory::new(tx.tx_ref()),
+        DatabaseHashedCursorFactory::new(tx.tx_ref()),
+    )
+    .root_with_updates()
+    .unwrap();
+    provider_factory
+        .provider_rw()
+        .unwrap()
+        .write_trie_updates(&updates)
+        .unwrap();
 
-    tx.commit().unwrap();
     root_hash
 }
 
@@ -184,7 +194,7 @@ fn test_print_toy_trie() {
     let hashed_address = B256::new(hex!(
         "30af561000000000000000000000000000000000000000000000000000000000"
     ));
-    
+
     let target = Nibbles::unpack(hashed_address);
     // let path = trie_fetcher.account_proof_path(target).unwrap();
     // print_path(&path);
