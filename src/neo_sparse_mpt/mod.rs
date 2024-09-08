@@ -4,6 +4,7 @@ use ahash::HashMap;
 use alloy_primitives::keccak256;
 use alloy_primitives::Bytes;
 use alloy_primitives::B256;
+use alloy_rlp::Decodable;
 use alloy_rlp::Encodable;
 use alloy_trie::Nibbles;
 use thiserror::Error;
@@ -23,6 +24,8 @@ pub enum SparseTrieError {
     KeyNotFound,
     #[error("Node not found {0:?}")]
     NodeNotFound(Nibbles),
+    #[error("Node decode error {0:?}")]
+    NodeDecodeError(#[from] alloy_rlp::Error),
 }
 
 #[derive(Debug, Clone, Default)]
@@ -75,54 +78,71 @@ impl SparseTrieNodes {
         &mut self,
         nodes: impl Iterator<Item = (Nibbles, Bytes)>,
     ) -> Result<(), SparseTrieError> {
-        //for (path, bytes) in nodes {}
-        todo!()
+        for (path, node) in nodes {
+            let node = SparseTrieNode::decode(&mut node.as_ref())?;
+            self.nodes.insert(path, node);
+        }
+        Ok(())
     }
 
     pub fn delete(&mut self, key: Bytes) -> Result<(), SparseTrieError> {
-        let mut path_left = Nibbles::unpack(key);
-        let mut current_node = Nibbles::with_capacity(path_left.len());
+        let mut c = NodeCursor::new(key);
 
         let mut walk_path: Vec<(Nibbles, u8)> = Vec::new();
 
         loop {
-            let node = self.try_get_node_mut(&current_node)?;
+            let node = self.try_get_node_mut(&c.current_node)?;
 
             match &mut node.kind {
                 SparseTrieNodeKind::NullNode => {
                     return Err(SparseTrieError::KeyNotFound);
                 }
                 SparseTrieNodeKind::LeafNode(leaf) => {
-                    if leaf.key == path_left {
-                        walk_path.push((current_node.clone(), 0));
+                    if leaf.key == c.path_left {
+                        walk_path.push((c.current_node, 0));
                         break;
                     } else {
                         return Err(SparseTrieError::KeyNotFound);
                     }
                 }
                 SparseTrieNodeKind::ExtensionNode(extension) => {
-                    if !path_left.starts_with(&extension.key) {
+                    if !c.path_left.starts_with(&extension.key) {
                         return Err(SparseTrieError::KeyNotFound);
                     }
-                    walk_path.push((current_node.clone(), 0));
-                    path_left = Nibbles::from_nibbles_unchecked(&path_left[extension.key.len()..]);
+                    walk_path.push((c.current_node.clone(), 0));
+                    c.step_into_extension(extension.key.len());
 
-                    current_node = concat_path(&current_node, extension.key.as_slice());
                     // pass deletion deeper
                     extension.child.rlp_pointer_dirty = true;
                     node.rlp_pointer_dirty = true;
                     continue;
                 }
                 SparseTrieNodeKind::BranchNode(branch) => {
-                    // TODO: check if we are removing from the branch with one child and we don't have a child
-                    let (n, new_path_left) = strip_first_nibble(path_left.clone());
-                    let child_path = concat_path(&current_node, &[n]);
+                    let n = c
+                        .path_left
+                        .first()
+                        .expect("trying to delete key from branch");
+                    let branch_node_path = c.current_node.clone();
+
+                    let n = c.step_into_branch();
                     if let Some(child) = &mut branch.children[n as usize] {
-                        walk_path.push((current_node.clone(), n));
-                        current_node = child_path;
-                        path_left = new_path_left;
                         node.rlp_pointer_dirty = true;
                         child.rlp_pointer_dirty = true;
+
+                        // check if we are removing from the branch with one child and we don't have a child
+                        // its important to do it here so we don't modify the trie
+                        let child_count = branch.child_count();
+                        if child_count == 2 {
+                            let other_child_idx = branch
+                                .other_child(n as usize)
+                                .expect("other child must exist");
+                            let other_child_path =
+                                BranchNode::child_path(&branch_node_path, other_child_idx as u8);
+                            if !self.nodes.contains_key(&other_child_path) {
+                                return Err(SparseTrieError::NodeNotFound(other_child_path));
+                            }
+                        }
+                        walk_path.push((branch_node_path, n));
                         continue;
                     } else {
                         return Err(SparseTrieError::KeyNotFound);
@@ -131,13 +151,15 @@ impl SparseTrieNodes {
             }
         }
 
+        // now we walk our path back
+
         #[derive(Debug)]
         enum NodeDeletionResult {
             NodeDeleted,
             NodeUpdated,
             BranchBelowRemovedWithOneChild {
                 child_nibble: u8,
-                child_ptr: Nibbles,
+                child_path: Nibbles,
             },
         }
 
@@ -146,7 +168,9 @@ impl SparseTrieNodes {
         for (current_node, current_node_child) in walk_path.into_iter().rev() {
             match &mut deletion_result {
                 NodeDeletionResult::NodeDeleted => {
-                    let node = self.try_get_node_mut(&current_node)?;
+                    let node = self
+                        .try_get_node_mut(&current_node)
+                        .expect("nodes must exist when walking back");
                     let should_remove = match &mut node.kind {
                         SparseTrieNodeKind::NullNode => unreachable!(),
                         SparseTrieNodeKind::LeafNode(_) => {
@@ -162,22 +186,15 @@ impl SparseTrieNodes {
                             unreachable!("Child of the extension node can't be deleted in sec trie")
                         }
                         SparseTrieNodeKind::BranchNode(branch) => {
-                            let child_count =
-                                branch.children.iter().filter(|c| c.is_some()).count();
-                            match child_count - 1 {
-                                0 => {
-                                    // removing last child, should not be triggered
-                                    unreachable!()
+                            let child_count = branch.child_count();
+                            match child_count {
+                                0..=1 => {
+                                    unreachable!("removing last child or removing from branch without children")
                                 }
-                                1 => {
+                                2 => {
                                     // removing one but last child, remove branch node and bubble the deletion up
-                                    let (other_child_index, other_child) = branch
-                                        .children
-                                        .iter()
-                                        .enumerate()
-                                        .find(|(idx, c)| {
-                                            c.is_some() && *idx != current_node_child as usize
-                                        })
+                                    let other_child_index = branch
+                                        .other_child(current_node_child as usize)
                                         .expect("other child must exist");
                                     let child_path = BranchNode::child_path(
                                         &current_node,
@@ -186,11 +203,11 @@ impl SparseTrieNodes {
                                     deletion_result =
                                         NodeDeletionResult::BranchBelowRemovedWithOneChild {
                                             child_nibble: other_child_index as u8,
-                                            child_ptr: child_path,
+                                            child_path,
                                         };
                                     true
                                 }
-                                2.. => {
+                                3.. => {
                                     branch.children[current_node_child as usize] = None;
                                     deletion_result = NodeDeletionResult::NodeUpdated;
                                     break;
@@ -207,11 +224,11 @@ impl SparseTrieNodes {
                 NodeDeletionResult::NodeUpdated => break,
                 NodeDeletionResult::BranchBelowRemovedWithOneChild {
                     child_nibble,
-                    child_ptr,
+                    child_path,
                 } => {
-                    let child_below = self.try_remove_node(&child_ptr)?;
-                    // TODO: remove useless clone
-                    let mut child_below_clone = child_below.clone();
+                    let child_below = self
+                        .try_remove_node(&child_path)
+                        .expect("orphaned child existance is checked when walking down");
                     let node_above = self.try_get_node_mut(&current_node)?;
                     let mut reinsert_nodes = Vec::with_capacity(2);
                     match (&mut node_above.kind, child_below.kind) {
@@ -234,77 +251,82 @@ impl SparseTrieNodes {
                         ) => {
                             // we merge two extension nodes into current node with child_nibble
                             ext_above.key.push(*child_nibble);
-                            ext_above.key = concat_path(&ext_above.key, ext_below.key.as_slice());
+                            ext_above
+                                .key
+                                .extend_from_slice_unchecked(ext_below.key.as_slice());
                             ext_above.child = ext_below.child;
                         }
                         (
                             SparseTrieNodeKind::ExtensionNode(ext_above),
-                            SparseTrieNodeKind::BranchNode(_),
+                            SparseTrieNodeKind::BranchNode(branch),
                         ) => {
                             // we consume remove child nibble into extension node and reinsert branch into the trie
                             // but with a different path
                             ext_above.key.push(*child_nibble);
                             let new_child_path = ext_above.child_path(&current_node);
-                            reinsert_nodes.push((new_child_path, child_below_clone));
+                            let new_child = SparseTrieNode {
+                                kind: SparseTrieNodeKind::BranchNode(branch),
+                                rlp_pointer: child_below.rlp_pointer,
+                                rlp_pointer_dirty: child_below.rlp_pointer_dirty,
+                            };
+                            reinsert_nodes.push((new_child_path, new_child));
                         }
                         (
                             SparseTrieNodeKind::BranchNode(branch),
                             SparseTrieNodeKind::LeafNode(mut leaf_below),
                         ) => {
-                            node_above.rlp_pointer_dirty = true;
-                            branch.children[current_node_child as usize]
-                                .as_mut()
-                                .map(|c| c.rlp_pointer_dirty = true);
-
                             // merge missing nibble into the leaf
-                            let mut new_leaf_key = Nibbles::new();
-                            new_leaf_key.push(*child_nibble);
-                            new_leaf_key.extend_from_slice(&leaf_below.key);
-                            leaf_below.key = new_leaf_key;
+                            leaf_below
+                                .key
+                                .as_mut_vec_unchecked()
+                                .insert(0, *child_nibble);
                             let new_child_path =
-                                Nibbles::from_nibbles_unchecked(&child_ptr[..child_ptr.len() - 1]);
-                            child_below_clone.kind = SparseTrieNodeKind::LeafNode(leaf_below);
-                            reinsert_nodes.push((new_child_path, child_below_clone));
+                                BranchNode::child_path(&current_node, current_node_child);
+                            let new_child =
+                                SparseTrieNode::new(SparseTrieNodeKind::LeafNode(leaf_below));
+                            reinsert_nodes.push((new_child_path, new_child));
                         }
                         (
                             SparseTrieNodeKind::BranchNode(branch),
                             SparseTrieNodeKind::ExtensionNode(mut ext_below),
                         ) => {
-                            node_above.rlp_pointer_dirty = true;
-                            branch.children[current_node_child as usize]
-                                .as_mut()
-                                .map(|c| c.rlp_pointer_dirty = true);
-
                             // merge missing nibble into the extension
-                            let mut new_ext_key = Nibbles::new();
-                            new_ext_key.push(*child_nibble);
-                            new_ext_key.extend_from_slice(&ext_below.key);
-                            ext_below.key = new_ext_key;
+                            ext_below
+                                .key
+                                .as_mut_vec_unchecked()
+                                .insert(0, *child_nibble);
                             let new_child_path =
-                                Nibbles::from_nibbles_unchecked(&child_ptr[..child_ptr.len() - 1]);
-                            child_below_clone.kind = SparseTrieNodeKind::ExtensionNode(ext_below);
-                            reinsert_nodes.push((new_child_path, child_below_clone));
+                                BranchNode::child_path(&current_node, current_node_child);
+                            let new_child =
+                                SparseTrieNode::new(SparseTrieNodeKind::ExtensionNode(ext_below));
+                            reinsert_nodes.push((new_child_path, new_child));
                         }
                         (
                             SparseTrieNodeKind::BranchNode(branch),
-                            SparseTrieNodeKind::BranchNode(_),
+                            SparseTrieNodeKind::BranchNode(branch_below),
                         ) => {
-                            node_above.rlp_pointer_dirty = true;
-                            branch.children[current_node_child as usize]
-                                .as_mut()
-                                .map(|c| c.rlp_pointer_dirty = true);
-
-                            let branch_path = child_ptr.clone();
+                            let branch_path = child_path.clone();
 
                             // we leave branch in the trie but create extension node instead of the remove one child node
                             let new_ext_path =
                                 BranchNode::child_path(&current_node, current_node_child);
                             let new_ext_node =
-                                SparseTrieNode::new_ext_node(Nibbles::from_nibbles_unchecked(&[
+                                ExtensionNode::new(Nibbles::from_nibbles_unchecked(&[
                                     *child_nibble,
                                 ]));
+                            let below_branch_path = new_ext_node.child_path(&new_ext_path);
+                            let new_ext_node = SparseTrieNode::new(
+                                SparseTrieNodeKind::ExtensionNode(new_ext_node),
+                            );
+
+                            let branch_below_node = SparseTrieNode {
+                                kind: SparseTrieNodeKind::BranchNode(branch_below),
+                                rlp_pointer: child_below.rlp_pointer,
+                                rlp_pointer_dirty: child_below.rlp_pointer_dirty,
+                            };
+
                             reinsert_nodes.push((new_ext_path, new_ext_node));
-                            reinsert_nodes.push((branch_path, child_below_clone));
+                            reinsert_nodes.push((below_branch_path, branch_below_node));
                         }
                         _ => unreachable!(),
                     }
@@ -327,7 +349,7 @@ impl SparseTrieNodes {
             }
             NodeDeletionResult::BranchBelowRemovedWithOneChild {
                 child_nibble,
-                child_ptr,
+                child_path: child_ptr,
             } => {
                 let child_below = self.try_remove_node(&child_ptr)?;
                 let new_top_node = match child_below.kind {
@@ -394,6 +416,7 @@ impl SparseTrieNodes {
                     if leaf.key == c.path_left {
                         // update leaf inplace
                         leaf.value = value;
+                        node.rlp_pointer_dirty = true;
                         break;
                     }
 
@@ -528,6 +551,7 @@ impl SparseTrieNodes {
     }
 
     pub fn hash_seq(&mut self) -> Result<B256, SparseTrieError> {
+        // TODO: to do without recursion
         let mut updates = HashMap::default();
         let root_node = Nibbles::new();
         self.update_rlp_pointers(root_node.clone(), &mut updates)?;
@@ -559,11 +583,17 @@ impl SparseTrieNodes {
                 if ext.child.rlp_pointer_dirty {
                     let child_path = ext.child_path(&node_path);
                     self.update_rlp_pointers(child_path.clone(), updates)?;
-                    let updated_child = updates
-                        .get(&child_path)
-                        .expect("update must happen")
-                        .rlp_pointer
-                        .clone();
+                    let updated_child = if let Some(updated_child) = updates.get(&child_path) {
+                        assert!(!updated_child.rlp_pointer_dirty);
+                        updated_child.rlp_pointer.clone()
+                    } else {
+                        let child_in_trie = self.try_get_node(&child_path)?;
+                        assert!(
+                            !child_in_trie.rlp_pointer_dirty,
+                            "update must happen or child should be not dirty"
+                        );
+                        child_in_trie.rlp_pointer.clone()
+                    };
                     ext.child.rlp_pointer = updated_child;
                     ext.child.rlp_pointer_dirty = false;
                 }
@@ -582,11 +612,17 @@ impl SparseTrieNodes {
                     }
                     let child_path = BranchNode::child_path(&node_path, idx as u8);
                     self.update_rlp_pointers(child_path.clone(), updates)?;
-                    let updated_child = updates
-                        .get(&child_path)
-                        .expect("update must happen")
-                        .rlp_pointer
-                        .clone();
+                    let updated_child = if let Some(updated_child) = updates.get(&child_path) {
+                        assert!(!updated_child.rlp_pointer_dirty);
+                        updated_child.rlp_pointer.clone()
+                    } else {
+                        let child_in_trie = self.try_get_node(&child_path)?;
+                        assert!(
+                            !child_in_trie.rlp_pointer_dirty,
+                            "update must happen or child should be not dirty"
+                        );
+                        child_in_trie.rlp_pointer.clone()
+                    };
                     child.rlp_pointer = updated_child;
                     child.rlp_pointer_dirty = false;
                 }

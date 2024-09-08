@@ -51,6 +51,14 @@ pub struct SparseTrieNode {
 }
 
 impl SparseTrieNode {
+    pub fn new(kind: SparseTrieNodeKind) -> Self {
+        Self {
+            kind,
+            rlp_pointer: Bytes::new(),
+            rlp_pointer_dirty: true,
+        }
+    }
+
     pub fn null_node() -> Self {
         // todo: nit, can be not dirty
         Self {
@@ -161,6 +169,13 @@ pub struct ExtensionNode {
 }
 
 impl ExtensionNode {
+    pub fn new(key: Nibbles) -> Self {
+        Self {
+            key,
+            child: NodePointer::empty_pointer(),
+        }
+    }
+
     pub fn child_path(&self, node_path: &Nibbles) -> Nibbles {
         let mut res = Nibbles::with_capacity(node_path.len() + self.key.len());
         res.extend_from_slice(&node_path);
@@ -179,6 +194,20 @@ impl BranchNode {
         let mut res = Nibbles::with_capacity(node_path.len() + 1);
         res.extend_from_slice(&node_path);
         res.push_unchecked(nibble);
+        res
+    }
+
+    pub fn child_count(&self) -> usize {
+        self.children.iter().filter(|c| c.is_some()).count()
+    }
+
+    pub fn other_child(&self, child: usize) -> Option<usize> {
+        let res = self
+            .children
+            .iter()
+            .enumerate()
+            .find(|(idx, c)| c.is_some() && *idx != child)
+            .map(|(idx, _)| idx);
         res
     }
 }
@@ -365,13 +394,4 @@ impl Encodable for SparseTrieNode {
             SparseTrieNodeKind::NullNode => 1,
         }
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use alloy_primitives::hex::FromHex;
-
-    #[test]
-    fn test_node_encode_decode() {}
 }

@@ -6,15 +6,27 @@ use proptest::proptest;
 
 use super::*;
 
-fn compare_impls(data: &[(Vec<u8>, Vec<u8>)]) {
+fn compare_impls_with_hashing(data: &[(Vec<u8>, Vec<u8>)], insert_hashing: bool) {
     let expected = reference_trie_hash(data);
     let mut trie = SparseTrieNodes::empty_trie();
     for (key, value) in data {
         trie.insert(key.clone().into(), value.clone().into())
             .expect("can't insert");
+        if insert_hashing {
+            trie.hash_seq().expect("must hash after insert");
+        }
     }
     let got = trie.hash_seq().expect("hashing failed");
-    assert_eq!(got, expected);
+    assert_eq!(
+        got, expected,
+        "comparing hashing, insert_hashing: {}",
+        insert_hashing
+    );
+}
+
+fn compare_impls(data: &[(Vec<u8>, Vec<u8>)]) {
+    compare_impls_with_hashing(data, false);
+    compare_impls_with_hashing(data, true);
 }
 
 #[test]
@@ -112,10 +124,10 @@ fn insert_into_branch_leaf_child() {
     compare_impls(data);
 }
 
-fn compare_with_removals(
+fn compare_with_removals_with_hashing(
     data: &[(Vec<u8>, Vec<u8>)],
     remove: &[Vec<u8>],
-    print: bool,
+    insert_hashing: bool,
 ) -> Result<(), SparseTrieError> {
     let removed_keys: HashSet<_> = remove.iter().cloned().collect();
     let filtered_data: Vec<_> = data
@@ -130,28 +142,35 @@ fn compare_with_removals(
     for (key, val) in data {
         trie.insert(key.clone().into(), val.clone().into())
             .expect("must insert");
+        if insert_hashing {
+            trie.hash_seq().expect("must hash after insert");
+        }
     }
-
-    // dbg!(&trie);
-    // if print {
-    //     println!("Before deletion");
-    //     trie.print_trie();
-    // }
 
     for key in remove {
         trie.delete(key.clone().into())?;
+        if insert_hashing {
+            trie.hash_seq().expect("must hash after delete");
+        }
     }
 
-    // dbg!(&trie);
-    // if print {
-    //     println!();
-    //     println!("After deletion");
-    //     trie.print_trie();
-    // }
-
     let hash = trie.hash_seq().expect("must hash");
-    assert_eq!(hash, reference_hash);
+    assert_eq!(
+        hash, reference_hash,
+        "comparing hashing, insert_hashing: {}",
+        insert_hashing
+    );
 
+    Ok(())
+}
+
+fn compare_with_removals(
+    data: &[(Vec<u8>, Vec<u8>)],
+    remove: &[Vec<u8>],
+    print: bool,
+) -> Result<(), SparseTrieError> {
+    compare_with_removals_with_hashing(data, remove, false)?;
+    // compare_with_removals_with_hashing(data, remove, true)?;
     Ok(())
 }
 
@@ -187,22 +206,22 @@ fn remove_extension_node_error() {
     let add = &[(vec![0x11, 0x1], vec![0x0a]), (vec![0x11, 0x2], vec![0x0b])];
 
     let remove = &[vec![0x12]];
-
-    compare_with_removals(add, remove, true).unwrap_err();
 }
 
-// #[test]
-// fn remove_branch_err() {
-//     let add = &[
-//         (vec![0x01, 0x10], vec![0x0a]),
-//         (vec![0x01, 0x20], vec![0x0b]),
-//         (vec![0x01, 0x30], vec![0x0c]),
-//     ];
-//
-//     let remove = &[vec![0x01]];
-//
-//     compare_with_removals(add, remove, true).unwrap_err();
-// }
+// must panic
+#[test]
+#[should_panic]
+fn remove_branch_err() {
+    let add = &[
+        (vec![0x01, 0x10], vec![0x0a]),
+        (vec![0x01, 0x20], vec![0x0b]),
+        (vec![0x01, 0x30], vec![0x0c]),
+    ];
+
+    let remove = &[vec![0x01]];
+
+    compare_with_removals(add, remove, true).unwrap_or_default();
+}
 
 #[test]
 fn remove_branch_leave_2_children() {
@@ -372,9 +391,11 @@ proptest! {
 
     #[test]
     fn proptest_random_insert_remove_any_values(key_values in any::<Vec<(([u8; 3], bool), Vec<u8>)>>()) {
+        let mut keys_to_remove_set = HashSet::default();
         let mut keys_to_remove = Vec::new();
         let data: Vec<_> = key_values.into_iter().map(|((k, remove), v)| {
-            if remove {
+            if remove && !keys_to_remove_set.contains(&k) {
+                keys_to_remove_set.insert(k.clone());
                 keys_to_remove.push(k.to_vec());
             }
             (k.to_vec(), v)
