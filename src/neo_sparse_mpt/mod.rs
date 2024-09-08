@@ -74,11 +74,20 @@ impl SparseTrieNodes {
         }
     }
 
+    pub fn uninit_trie() -> Self {
+        Self {
+            nodes: HashMap::default(),
+        }
+    }
+
     pub fn add_nodes(
         &mut self,
         nodes: impl Iterator<Item = (Nibbles, Bytes)>,
     ) -> Result<(), SparseTrieError> {
         for (path, node) in nodes {
+            if self.nodes.contains_key(&path) {
+                continue;
+            }
             let node = SparseTrieNode::decode(&mut node.as_ref())?;
             self.nodes.insert(path, node);
         }
@@ -698,6 +707,8 @@ impl SparseTrieNodes {
                         let nibble = c.step_into_branch();
                         if branch.children[nibble as usize].is_some() {
                             if delete {
+                                // here we check if we might delete all but one child from this branch
+                                // and if so we add remaining child into the list of nodes that we need
                                 branch.aux_bits &= !(1 << nibble);
                                 if branch.aux_bits.count_ones() == 1 {
                                     let child_that_might_be_removed =
