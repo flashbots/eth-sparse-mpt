@@ -1,7 +1,6 @@
 use std::borrow::BorrowMut;
 
 use ahash::HashMap;
-use std::collections::BTreeMap;
 use alloy_primitives::keccak256;
 use alloy_primitives::Bytes;
 use alloy_primitives::B256;
@@ -31,7 +30,39 @@ pub struct SparseTrieNodes {
     nodes: HashMap<Nibbles, SparseTrieNode>,
 }
 
+struct NodeCursor {
+    path_left: Nibbles,
+    current_node: Nibbles,
+}
+
+impl NodeCursor {
+    fn new(key: Bytes) -> Self {
+        let path_left = Nibbles::unpack(key);
+        let current_node = Nibbles::with_capacity(path_left.len());
+        Self {
+            path_left,
+            current_node,
+        }
+    }
+
+    fn step_into_extension(&mut self, len: usize) {
+        self.current_node
+            .extend_from_slice_unchecked(&self.path_left[..len]);
+        self.path_left.as_mut_vec_unchecked().drain(..len);
+    }
+
+    fn step_into_branch(&mut self) -> u8 {
+        let nibble = strip_first_nibble_mut(&mut self.path_left);
+        self.current_node.push_unchecked(nibble);
+        nibble
+    }
+}
+
 impl SparseTrieNodes {
+    pub fn reserve(&mut self, n: usize) {
+        self.nodes.reserve(n);
+    }
+
     pub fn empty_trie() -> Self {
         Self {
             nodes: [(Nibbles::new(), SparseTrieNode::null_node())]
@@ -148,8 +179,10 @@ impl SparseTrieNodes {
                                             c.is_some() && *idx != current_node_child as usize
                                         })
                                         .expect("other child must exist");
-                                    let child_path =
-                                        branch.child_path(&current_node, other_child_index as u8);
+                                    let child_path = BranchNode::child_path(
+                                        &current_node,
+                                        other_child_index as u8,
+                                    );
                                     deletion_result =
                                         NodeDeletionResult::BranchBelowRemovedWithOneChild {
                                             child_nibble: other_child_index as u8,
@@ -187,9 +220,9 @@ impl SparseTrieNodes {
                             SparseTrieNodeKind::LeafNode(leaf_below),
                         ) => {
                             // we just replace extension node by merging its path into leaf with child_nibble
-			    let mut new_leaf_key = ext_above.key.clone();
+                            let mut new_leaf_key = ext_above.key.clone();
                             new_leaf_key.push(*child_nibble);
-			    new_leaf_key.extend_from_slice_unchecked(&leaf_below.key);
+                            new_leaf_key.extend_from_slice_unchecked(&leaf_below.key);
 
                             let mut new_leaf = leaf_below;
                             new_leaf.key = new_leaf_key;
@@ -212,7 +245,6 @@ impl SparseTrieNodes {
                             // but with a different path
                             ext_above.key.push(*child_nibble);
                             let new_child_path = ext_above.child_path(&current_node);
-                            ext_above.child.path = Some(new_child_path.clone());
                             reinsert_nodes.push((new_child_path, child_below_clone));
                         }
                         (
@@ -265,11 +297,12 @@ impl SparseTrieNodes {
                             let branch_path = child_ptr.clone();
 
                             // we leave branch in the trie but create extension node instead of the remove one child node
-                            let new_ext_path = branch.child_path(&current_node, current_node_child);
-                            let new_ext_node = SparseTrieNode::new_ext_node(
-                                Nibbles::from_nibbles_unchecked(&[*child_nibble]),
-                                branch_path.clone(),
-                            );
+                            let new_ext_path =
+                                BranchNode::child_path(&current_node, current_node_child);
+                            let new_ext_node =
+                                SparseTrieNode::new_ext_node(Nibbles::from_nibbles_unchecked(&[
+                                    *child_nibble,
+                                ]));
                             reinsert_nodes.push((new_ext_path, new_ext_node));
                             reinsert_nodes.push((branch_path, child_below_clone));
                         }
@@ -330,15 +363,12 @@ impl SparseTrieNodes {
                                 rlp_pointer_dirty: child_below.rlp_pointer_dirty,
                             },
                         );
-                        let extension_node = SparseTrieNode::new_ext_node(
-                            path_to_branch.clone(),
-                            path_to_branch.clone(),
-                        );
+                        let extension_node = SparseTrieNode::new_ext_node(path_to_branch.clone());
                         extension_node
                     }
                     SparseTrieNodeKind::NullNode => unreachable!(),
                 };
-		self.nodes.insert(Nibbles::new(), new_top_node);
+                self.nodes.insert(Nibbles::new(), new_top_node);
             }
             NodeDeletionResult::NodeUpdated => {}
         }
@@ -346,45 +376,45 @@ impl SparseTrieNodes {
         Ok(())
     }
 
-    pub fn insert_or_update(&mut self, key: Bytes, value: Bytes) -> Result<(), SparseTrieError> {
-        let mut path_left = Nibbles::unpack(key);
-        let mut current_node = Nibbles::with_capacity(path_left.len());
+    pub fn insert(&mut self, key: Bytes, value: Bytes) -> Result<(), SparseTrieError> {
+        let mut c = NodeCursor::new(key);
+
         let mut new_nodes: Vec<(Nibbles, SparseTrieNode)> = Vec::with_capacity(0);
 
         loop {
-            let node = self.try_get_node_mut(&current_node)?;
+            let node = self.try_get_node_mut(&c.current_node)?;
 
             match &mut node.kind {
                 SparseTrieNodeKind::NullNode => {
-                    let new_node = SparseTrieNode::new_leaf_node(path_left, value);
+                    let new_node = SparseTrieNode::new_leaf_node(c.path_left, value);
                     *node = new_node;
                     break;
                 }
                 SparseTrieNodeKind::LeafNode(leaf) => {
-                    if leaf.key == path_left {
+                    if leaf.key == c.path_left {
                         // update leaf inplace
                         leaf.value = value;
                         break;
                     }
 
-                    let (pref, suff1, suff2) = extract_prefix_and_suffix(&path_left, &leaf.key);
+                    let (pref, mut suff1, mut suff2) =
+                        extract_prefix_and_suffix(&c.path_left, &leaf.key);
                     assert!(suff1.len() == suff2.len() && !suff1.is_empty());
 
-                    let (n1, key1) = strip_first_nibble(suff1);
-                    let (n2, key2) = strip_first_nibble(suff2);
+                    let n1 = strip_first_nibble_mut(&mut suff1);
+                    let n2 = strip_first_nibble_mut(&mut suff2);
+                    let key1 = suff1;
+                    let key2 = suff2;
 
-                    let branch_node_path = concat_path(&current_node, pref.as_slice());
-                    let path_to_leaf1 = concat_path(&branch_node_path, &[n1]);
-                    let path_to_leaf2 = concat_path(&branch_node_path, &[n2]);
-                    let branch_node = SparseTrieNode::new_branch_node(
-                        n1,
-                        path_to_leaf1.clone(),
-                        n2,
-                        path_to_leaf2.clone(),
-                    );
+                    let branch_node_path = concat_path(&c.current_node, pref.as_slice());
+                    let path_to_leaf1 = BranchNode::child_path(&branch_node_path, n1);
+                    let path_to_leaf2 = BranchNode::child_path(&branch_node_path, n2);
+                    let branch_node = SparseTrieNode::new_branch_node(n1, n2);
 
                     let leaf1 = SparseTrieNode::new_leaf_node(key1, value);
                     let leaf2 = SparseTrieNode::new_leaf_node(key2, leaf.value.clone());
+
+                    new_nodes.reserve(3);
                     new_nodes.push((path_to_leaf1, leaf1));
                     new_nodes.push((path_to_leaf2, leaf2));
 
@@ -392,56 +422,56 @@ impl SparseTrieNodes {
                     let replace_current_node = if pref.is_empty() {
                         branch_node
                     } else {
-                        new_nodes.push((branch_node_path.clone(), branch_node));
-                        SparseTrieNode::new_ext_node(pref, branch_node_path)
+                        new_nodes.push((branch_node_path, branch_node));
+                        SparseTrieNode::new_ext_node(pref)
                     };
 
                     *node = replace_current_node;
                     break;
                 }
                 SparseTrieNodeKind::ExtensionNode(extension) => {
-                    if path_left.starts_with(&extension.key) {
-                        path_left =
-                            Nibbles::from_nibbles_unchecked(&path_left[extension.key.len()..]);
-                        current_node = concat_path(&current_node, extension.key.as_slice());
+                    if c.path_left.starts_with(&extension.key) {
                         // pass insertion deeper
+                        c.step_into_extension(extension.key.len());
                         extension.child.rlp_pointer_dirty = true;
                         node.rlp_pointer_dirty = true;
                         continue;
                     }
 
-                    let (pref, suff1, suff2) =
-                        extract_prefix_and_suffix(&path_left, &extension.key);
+                    let (pref, mut suff1, mut suff2) =
+                        extract_prefix_and_suffix(&c.path_left, &extension.key);
                     assert!(!suff2.is_empty());
                     assert!(
                         !suff1.is_empty(),
                         "in sec trie we don't insert value into branch nodes"
                     );
 
-                    let (n1, key1) = strip_first_nibble(suff1);
-                    let (n2, key2) = strip_first_nibble(suff2);
+                    let n1 = strip_first_nibble_mut(&mut suff1);
+                    let n2 = strip_first_nibble_mut(&mut suff2);
+                    let key1 = suff1;
+                    let key2 = suff2;
 
-                    let branch_node_path = concat_path(&current_node, pref.as_slice());
-                    let leaf_path = concat_path(&branch_node_path, &[n1]);
+                    let branch_node_path = concat_path(&c.current_node, pref.as_slice());
+                    let leaf_path = BranchNode::child_path(&branch_node_path, n1);
                     let leaf = SparseTrieNode::new_leaf_node(key1, value);
-                    new_nodes.push((leaf_path.clone(), leaf));
-                    let other_branch_child_path = concat_path(&branch_node_path, &[n2]);
+                    new_nodes.reserve(3);
+                    new_nodes.push((leaf_path, leaf));
+                    let other_branch_child_path = BranchNode::child_path(&branch_node_path, n2);
 
                     // banch will point to the current extension child directly or to new extension node
                     // that will point to child
                     if !key2.is_empty() {
-                        let ext = SparseTrieNode::new_ext_node(key2, extension.key.clone());
-                        new_nodes.push((other_branch_child_path.clone(), ext));
+                        let ext = SparseTrieNode::new_ext_node(key2);
+                        new_nodes.push((other_branch_child_path, ext));
                     }
 
-                    let branch_node =
-                        SparseTrieNode::new_branch_node(n1, leaf_path, n2, other_branch_child_path);
+                    let branch_node = SparseTrieNode::new_branch_node(n1, n2);
                     // current node becomes either extension node pointing to a branch or branch node directly
                     let replace_current_node = if pref.is_empty() {
                         branch_node
                     } else {
-                        new_nodes.push((branch_node_path.clone(), branch_node));
-                        SparseTrieNode::new_ext_node(pref, branch_node_path)
+                        new_nodes.push((branch_node_path, branch_node));
+                        SparseTrieNode::new_ext_node(pref)
                     };
 
                     *node = replace_current_node;
@@ -449,29 +479,22 @@ impl SparseTrieNodes {
                 }
                 SparseTrieNodeKind::BranchNode(branch_node) => {
                     assert!(
-                        !path_left.is_empty(),
+                        !c.path_left.is_empty(),
                         "trying to insert value into a branch node (sec trie)"
                     );
                     node.rlp_pointer_dirty = true;
 
-                    let (n1, new_path_left) = strip_first_nibble(path_left.clone());
+                    let nibble = c.step_into_branch();
 
-                    let child_path = concat_path(&current_node, &[n1]);
-                    if let Some(child) = &mut branch_node.children[n1 as usize] {
-                        if child.path.is_none() {
-                            return Err(SparseTrieError::NodeNotFound(child_path));
-                        }
-                        current_node = child_path;
-                        path_left = new_path_left;
+                    if let Some(child) = &mut branch_node.children[nibble as usize] {
                         node.rlp_pointer_dirty = true;
                         child.rlp_pointer_dirty = true;
                         continue;
                     } else {
-                        branch_node.children[n1 as usize] =
-                            Some(NodePointer::path_pointer(child_path.clone()));
+                        branch_node.children[nibble as usize] = Some(NodePointer::empty_pointer());
                         new_nodes.push((
-                            child_path,
-                            SparseTrieNode::new_leaf_node(new_path_left, value),
+                            c.current_node,
+                            SparseTrieNode::new_leaf_node(c.path_left, value),
                         ));
                         break;
                     }
@@ -557,7 +580,7 @@ impl SparseTrieNodes {
                     if !child.rlp_pointer_dirty {
                         continue;
                     }
-                    let child_path = child.path.clone().expect("TODO handle");
+                    let child_path = BranchNode::child_path(&node_path, idx as u8);
                     self.update_rlp_pointers(child_path.clone(), updates)?;
                     let updated_child = updates
                         .get(&child_path)
@@ -578,9 +601,9 @@ impl SparseTrieNodes {
 
 fn extract_prefix_and_suffix(p1: &Nibbles, p2: &Nibbles) -> (Nibbles, Nibbles, Nibbles) {
     let prefix_len = p1.common_prefix_length(p2);
-    let prefix = Nibbles::from_nibbles(&p1[..prefix_len]);
-    let suffix1 = Nibbles::from_nibbles(&p1[prefix_len..]);
-    let suffix2 = Nibbles::from_nibbles(&p2[prefix_len..]);
+    let prefix = Nibbles::from_nibbles_unchecked(&p1[..prefix_len]);
+    let suffix1 = Nibbles::from_nibbles_unchecked(&p1[prefix_len..]);
+    let suffix2 = Nibbles::from_nibbles_unchecked(&p2[prefix_len..]);
 
     (prefix, suffix1, suffix2)
 }

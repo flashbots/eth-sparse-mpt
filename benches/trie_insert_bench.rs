@@ -1,4 +1,4 @@
-use alloy_primitives::{keccak256, B256, U256, Bytes};
+use alloy_primitives::{keccak256, Bytes, B256, U256};
 use alloy_trie::nodes::TrieNode;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use eth_sparse_mpt::neo_sparse_mpt::SparseTrieNodes;
@@ -19,15 +19,18 @@ fn add_elements_sparse_trie(keys: &[&[u8]], values: &[&[u8]]) -> B256 {
 
 fn add_elements_only_neo_sparse_trie(keys: &[Bytes], values: &[Bytes]) {
     let mut trie = SparseTrieNodes::empty_trie();
+    trie.reserve(keys.len());
     for (key, value) in keys.iter().zip(values.iter()) {
-        trie.insert_or_update(key.clone(), value.clone()).expect("can't insert");
+        trie.insert(key.clone(), value.clone())
+            .expect("can't insert");
     }
 }
 
 fn add_elements_only_neo_sparse_trie_insert_and_hash(keys: &[Bytes], values: &[Bytes]) -> B256 {
     let mut trie = SparseTrieNodes::empty_trie();
     for (key, value) in keys.iter().zip(values.iter()) {
-        trie.insert_or_update(key.clone(), value.clone()).expect("can't insert");
+        trie.insert(key.clone(), value.clone())
+            .expect("can't insert");
     }
     trie.hash_seq().expect("must hash")
 }
@@ -41,8 +44,14 @@ fn neo_trie_insert_only(c: &mut Criterion) {
         keys.push(data.clone());
         values.push(data.clone());
     }
-    let input_keys = keys.iter().map(|x| Bytes::from(x.as_slice().to_vec())).collect::<Vec<_>>();
-    let input_values = values.iter().map(|x| Bytes::from(x.as_slice().to_vec())).collect::<Vec<_>>();
+    let input_keys = keys
+        .iter()
+        .map(|x| Bytes::from(x.as_slice().to_vec()))
+        .collect::<Vec<_>>();
+    let input_values = values
+        .iter()
+        .map(|x| Bytes::from(x.as_slice().to_vec()))
+        .collect::<Vec<_>>();
     c.bench_function("neo trie 3000 elements insert only", |b| {
         b.iter(|| add_elements_only_neo_sparse_trie(&input_keys, &input_values))
     });
@@ -57,13 +66,18 @@ fn neo_trie_insert_and_hash(c: &mut Criterion) {
         keys.push(data.clone());
         values.push(data.clone());
     }
-    let input_keys = keys.iter().map(|x| Bytes::from(x.as_slice().to_vec())).collect::<Vec<_>>();
-    let input_values = values.iter().map(|x| Bytes::from(x.as_slice().to_vec())).collect::<Vec<_>>();
+    let input_keys = keys
+        .iter()
+        .map(|x| Bytes::from(x.as_slice().to_vec()))
+        .collect::<Vec<_>>();
+    let input_values = values
+        .iter()
+        .map(|x| Bytes::from(x.as_slice().to_vec()))
+        .collect::<Vec<_>>();
     c.bench_function("neo trie 3000 elements insert and hash", |b| {
         b.iter(|| add_elements_only_neo_sparse_trie_insert_and_hash(&input_keys, &input_values))
     });
 }
-
 
 fn trie_insert(c: &mut Criterion) {
     let mut keys = Vec::new();

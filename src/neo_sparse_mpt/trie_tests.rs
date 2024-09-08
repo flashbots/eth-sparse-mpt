@@ -10,7 +10,7 @@ fn compare_impls(data: &[(Vec<u8>, Vec<u8>)]) {
     let expected = reference_trie_hash(data);
     let mut trie = SparseTrieNodes::empty_trie();
     for (key, value) in data {
-        trie.insert_or_update(key.clone().into(), value.clone().into())
+        trie.insert(key.clone().into(), value.clone().into())
             .expect("can't insert");
     }
     let got = trie.hash_seq().expect("hashing failed");
@@ -128,7 +128,7 @@ fn compare_with_removals(
 
     let mut trie = SparseTrieNodes::empty_trie();
     for (key, val) in data {
-        trie.insert_or_update(key.clone().into(), val.clone().into())
+        trie.insert(key.clone().into(), val.clone().into())
             .expect("must insert");
     }
 
@@ -396,7 +396,7 @@ fn print_trie_example_from_reth() {
 
     let mut trie = SparseTrieNodes::empty_trie();
     for (idx, key) in keys.iter().enumerate() {
-        trie.insert_or_update(key.clone().into(), Bytes::copy_from_slice(&[idx as u8]))
+        trie.insert(key.clone().into(), Bytes::copy_from_slice(&[idx as u8]))
             .expect("insertion failed");
     }
     // trie.print_trie();

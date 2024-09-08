@@ -12,7 +12,7 @@ use alloy_trie::Nibbles;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NodePointer {
     // if Some than sparse trie contains the child
-    pub path: Option<Nibbles>,
+    // pub path: Option<Nibbles>,
     // rlp(node) or rpl(hash(node))
     pub rlp_pointer: Bytes,
     pub rlp_pointer_dirty: bool,
@@ -21,15 +21,13 @@ pub struct NodePointer {
 impl NodePointer {
     pub fn rlp_pointer(hash: Bytes) -> Self {
         Self {
-            path: None,
             rlp_pointer: hash,
             rlp_pointer_dirty: false,
         }
     }
 
-    pub fn path_pointer(path: Nibbles) -> Self {
+    pub fn empty_pointer() -> Self {
         Self {
-            path: Some(path),
             rlp_pointer: Bytes::new(),
             rlp_pointer_dirty: true,
         }
@@ -39,7 +37,6 @@ impl NodePointer {
 impl Default for NodePointer {
     fn default() -> Self {
         Self {
-            path: None,
             rlp_pointer: Bytes::new(),
             rlp_pointer_dirty: true,
         }
@@ -87,12 +84,11 @@ impl SparseTrieNode {
         }
     }
 
-    pub fn new_ext_node(key: Nibbles, path_to_child: Nibbles) -> Self {
+    pub fn new_ext_node(key: Nibbles) -> Self {
         Self {
             kind: SparseTrieNodeKind::ExtensionNode(ExtensionNode {
                 key,
                 child: NodePointer {
-                    path: Some(path_to_child),
                     rlp_pointer: Bytes::new(),
                     rlp_pointer_dirty: true,
                 },
@@ -102,16 +98,14 @@ impl SparseTrieNode {
         }
     }
 
-    pub fn new_branch_node(n1: u8, path1: Nibbles, n2: u8, path2: Nibbles) -> Self {
+    pub fn new_branch_node(n1: u8, n2: u8) -> Self {
         const ARRAY_REPEAT_VALUE: Option<NodePointer> = None;
         let mut children = Box::new([ARRAY_REPEAT_VALUE; 16]);
         children[n1 as usize] = Some(NodePointer {
-            path: Some(path1),
             rlp_pointer_dirty: true,
             rlp_pointer: Bytes::new(),
         });
         children[n2 as usize] = Some(NodePointer {
-            path: Some(path2),
             rlp_pointer_dirty: true,
             rlp_pointer: Bytes::new(),
         });
@@ -181,10 +175,10 @@ pub struct BranchNode {
 }
 
 impl BranchNode {
-    pub fn child_path(&self, node_path: &Nibbles, nibble: u8) -> Nibbles {
+    pub fn child_path(node_path: &Nibbles, nibble: u8) -> Nibbles {
         let mut res = Nibbles::with_capacity(node_path.len() + 1);
         res.extend_from_slice(&node_path);
-        res.extend_from_slice_unchecked(&[nibble]);
+        res.push_unchecked(nibble);
         res
     }
 }
