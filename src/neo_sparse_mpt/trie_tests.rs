@@ -404,21 +404,78 @@ proptest! {
     }
 }
 
+fn assert_corect_gather(
+    add: &[(Vec<u8>, Vec<u8>)],
+    changed: &[Vec<u8>],
+    deleted: &[Vec<u8>],
+    expected_node_nibbles: &[Vec<u8>],
+) {
+    let mut trie = SparseTrieNodes::empty_trie();
+    for (key, value) in add {
+        trie.insert(key.clone().into(), value.clone().into());
+    }
+    let changed_keys = changed
+        .iter()
+        .map(|c| Bytes::from(c.clone()))
+        .collect::<Vec<_>>();
+    let deleted_keys = deleted
+        .iter()
+        .map(|c| Bytes::from(c.clone()))
+        .collect::<Vec<_>>();
+
+    let result = trie
+        .gather_subtrie(&changed_keys, &deleted_keys)
+        .expect("should suceed");
+    for expected_node in expected_node_nibbles {
+        let path = Nibbles::from_nibbles_unchecked(expected_node);
+        assert!(result.nodes.contains_key(&path), "key {:?}", path);
+    }
+}
+
 #[test]
-fn print_trie_example_from_reth() {
-    let keys = &[
-        hex!("30af561000000000000000000000000000000000000000000000000000000000").to_vec(),
-        hex!("30af569000000000000000000000000000000000000000000000000000000000").to_vec(),
-        hex!("30af650000000000000000000000000000000000000000000000000000000000").to_vec(),
-        hex!("30af6f0000000000000000000000000000000000000000000000000000000000").to_vec(),
-        hex!("30af8f0000000000000000000000000000000000000000000000000000000000").to_vec(),
-        hex!("3100000000000000000000000000000000000000000000000000000000000000").to_vec(),
+fn test_gather_subtrie_simple() {
+    let add = &[
+        (vec![0x10], vec![0xa]),
+        (vec![0x23], vec![0xb]),
+        (vec![0x34], vec![0xc]),
     ];
 
-    let mut trie = SparseTrieNodes::empty_trie();
-    for (idx, key) in keys.iter().enumerate() {
-        trie.insert(key.clone().into(), Bytes::copy_from_slice(&[idx as u8]))
-            .expect("insertion failed");
-    }
-    // trie.print_trie();
+    let changed = &[vec![0x10]];
+    let deleted = &[];
+
+    let expected_nodes_nibbles = &[vec![], vec![0x01]];
+
+    assert_corect_gather(add, changed, deleted, expected_nodes_nibbles);
+}
+
+#[test]
+fn test_gather_subtrie_deletion() {
+    let add = &[
+        (vec![0x10], vec![0xa]),
+        (vec![0x23], vec![0xb]),
+        (vec![0x34], vec![0xc]),
+    ];
+
+    let changed = &[];
+    let deleted = &[vec![0x23]];
+
+    let expected_nodes_nibbles = &[vec![], vec![0x02]];
+
+    assert_corect_gather(add, changed, deleted, expected_nodes_nibbles);
+}
+
+#[test]
+fn test_gather_subtrie_deletion_need_neighbour() {
+    let add = &[
+        (vec![0x10], vec![0xa]),
+        (vec![0x23], vec![0xb]),
+        (vec![0x34], vec![0xc]),
+    ];
+
+    let changed = &[];
+    let deleted = &[vec![0x23], vec![0x34]];
+
+    let expected_nodes_nibbles = &[vec![], vec![0x01], vec![0x02], vec![0x03]];
+
+    assert_corect_gather(add, changed, deleted, expected_nodes_nibbles);
 }

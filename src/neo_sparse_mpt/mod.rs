@@ -635,11 +635,106 @@ impl SparseTrieNodes {
     }
 }
 
-fn extract_prefix_and_suffix(p1: &Nibbles, p2: &Nibbles) -> (Nibbles, Nibbles, Nibbles) {
-    let prefix_len = p1.common_prefix_length(p2);
-    let prefix = Nibbles::from_nibbles_unchecked(&p1[..prefix_len]);
-    let suffix1 = Nibbles::from_nibbles_unchecked(&p1[prefix_len..]);
-    let suffix2 = Nibbles::from_nibbles_unchecked(&p2[prefix_len..]);
+#[derive(Debug, Clone)]
+pub struct MissingNodes {
+    pub nodes: Vec<Nibbles>,
+}
 
-    (prefix, suffix1, suffix2)
+impl SparseTrieNodes {
+    pub fn gather_subtrie(
+        &self,
+        changed_keys: &[Bytes],
+        deleted_keys: &[Bytes],
+    ) -> Result<Self, MissingNodes> {
+        let mut missing_nodes = Vec::new();
+        let mut result = SparseTrieNodes {
+            nodes: HashMap::default(),
+        };
+
+        let iter = changed_keys
+            .iter()
+            .zip(std::iter::repeat(false))
+            .chain(deleted_keys.iter().zip(std::iter::repeat(true)));
+
+        for (changed_key, delete) in iter {
+            let mut c = NodeCursor::new(changed_key.clone());
+            loop {
+                let node = match self.try_get_node(&c.current_node) {
+                    Ok(node) => node,
+                    Err(SparseTrieError::NodeNotFound(_)) => {
+                        missing_nodes.push(Nibbles::unpack(&changed_key));
+                        break;
+                    }
+                    _ => unreachable!(),
+                };
+                let just_inserted = if !result.nodes.contains_key(&c.current_node) {
+                    result.nodes.insert(c.current_node.clone(), node.clone());
+                    true
+                } else {
+                    false
+                };
+                let node = result
+                    .nodes
+                    .get_mut(&c.current_node)
+                    .expect("we insert it above");
+                match &mut node.kind {
+                    SparseTrieNodeKind::NullNode => {
+                        // this is empty trie, we have everything to return
+                        return Ok(result);
+                    }
+                    SparseTrieNodeKind::LeafNode(_) => break,
+                    SparseTrieNodeKind::ExtensionNode(extension) => {
+                        if c.path_left.starts_with(&extension.key) {
+                            // go deeper
+                            c.step_into_extension(extension.key.len());
+                            continue;
+                        }
+                        break;
+                    }
+                    SparseTrieNodeKind::BranchNode(branch) => {
+                        if just_inserted {
+                            branch.aux_bits = branch.children_bits();
+                        }
+                        let nibble = c.step_into_branch();
+                        if branch.children[nibble as usize].is_some() {
+                            if delete {
+                                branch.aux_bits &= !(1 << nibble);
+                                if branch.aux_bits.count_ones() == 1 {
+                                    let child_that_might_be_removed =
+                                        branch.aux_bits.trailing_zeros();
+
+                                    let path = {
+                                        // this path points to current child that we stepped into so we change last nibble to get
+                                        // path of the child that migth be removed
+                                        let mut path = c.current_node.clone();
+                                        path.as_mut_vec_unchecked()
+                                            .last_mut()
+                                            .map(|v| *v = child_that_might_be_removed as u8)
+                                            .expect("can't be empty");
+                                        path
+                                    };
+                                    if let Some(might_be_orphan) = self.nodes.get(&path).cloned() {
+                                        result.nodes.insert(path, might_be_orphan);
+                                    } else {
+                                        missing_nodes.push(path)
+                                    }
+                                }
+                            }
+                            // go deeper
+                            continue;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+
+        if missing_nodes.is_empty() {
+            Ok(result)
+        } else {
+            Err(MissingNodes {
+                nodes: missing_nodes,
+            })
+        }
+    }
 }

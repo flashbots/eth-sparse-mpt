@@ -9,6 +9,10 @@ fn add_elements(keys: &[&[u8]], values: &[&[u8]]) -> B256 {
     triehash::trie_root::<KeccakHasher, _, _, _>(keys.iter().zip(values))
 }
 
+fn add_elements_bytes(keys: &[Bytes], values: &[Bytes]) -> B256 {
+    triehash::trie_root::<KeccakHasher, _, _, _>(keys.iter().zip(values))
+}
+
 fn add_elements_sparse_trie(keys: &[&[u8]], values: &[&[u8]]) -> B256 {
     let mut trie = SparseMPT::new_empty();
     for (key, value) in keys.iter().zip(values.iter()) {
@@ -76,6 +80,9 @@ fn neo_trie_insert_and_hash(c: &mut Criterion) {
         .collect::<Vec<_>>();
     c.bench_function("neo trie 3000 elements insert and hash", |b| {
         b.iter(|| add_elements_only_neo_sparse_trie_insert_and_hash(&input_keys, &input_values))
+    });
+    c.bench_function("trie 3000 elements reference", |b| {
+        b.iter(|| add_elements_bytes(&input_keys, &input_values))
     });
 }
 
@@ -209,7 +216,7 @@ criterion_group!(
     // trie_insert,
     // hashing,
     // cloning,
-    neo_trie_insert_only,
-    // neo_trie_insert_and_hash,
+    // neo_trie_insert_only,
+    neo_trie_insert_and_hash,
 );
 criterion_main!(benches);

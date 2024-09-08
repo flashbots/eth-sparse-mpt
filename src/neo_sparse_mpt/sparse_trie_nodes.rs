@@ -118,7 +118,10 @@ impl SparseTrieNode {
             rlp_pointer: Bytes::new(),
         });
         Self {
-            kind: SparseTrieNodeKind::BranchNode(BranchNode { children }),
+            kind: SparseTrieNodeKind::BranchNode(BranchNode {
+                children,
+                aux_bits: 0,
+            }),
             rlp_pointer: Bytes::new(),
             rlp_pointer_dirty: true,
         }
@@ -187,6 +190,7 @@ impl ExtensionNode {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct BranchNode {
     pub children: Box<[Option<NodePointer>; 16]>,
+    pub aux_bits: u16,
 }
 
 impl BranchNode {
@@ -208,6 +212,16 @@ impl BranchNode {
             .enumerate()
             .find(|(idx, c)| c.is_some() && *idx != child)
             .map(|(idx, _)| idx);
+        res
+    }
+
+    pub fn children_bits(&self) -> u16 {
+        let mut res = 0;
+        for (idx, child) in self.children.iter().enumerate() {
+            if child.is_some() {
+                res |= 1 << idx
+            }
+        }
         res
     }
 }
@@ -297,7 +311,10 @@ impl From<AlloyBranchNode> for BranchNode {
                 children[index as usize] = Some(NodePointer::rlp_pointer(rlp_data.into()));
             }
         }
-        Self { children }
+        Self {
+            children,
+            aux_bits: 0,
+        }
     }
 }
 
