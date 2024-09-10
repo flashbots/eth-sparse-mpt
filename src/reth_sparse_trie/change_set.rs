@@ -1,4 +1,5 @@
 use ahash::HashMap;
+use alloy_primitives::hex_literal::hex;
 use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
 use reth_trie::Nibbles;
 use revm::db::BundleAccount;
@@ -35,6 +36,10 @@ pub fn prepare_change_set<'a>(
 
         // @cache consider caching in the scratchpad
         let hashed_address = Bytes::copy_from_slice(keccak256(address).as_slice());
+
+        // let test_account = Bytes::from(hex!("07dbc2fd98c6f6265f2b5c8ebddf898b06ff1b3d74b54abf9c68ec2cb61f46f1"));
+        // let print = hashed_address == test_account;
+
         match bundle_account.account_info() {
             // account was modified
             Some(account) => {
@@ -47,10 +52,16 @@ pub fn prepare_change_set<'a>(
                 continue;
             }
         }
+
         let mut storage_updates_keys: Vec<Bytes> = Vec::new();
         let mut storage_updates_values: Vec<Bytes> = Vec::new();
         let mut storage_deleted_keys: Vec<Bytes> = Vec::new();
         for (storage_key, storage_value) in &bundle_account.storage {
+            // if print {
+            // 	let hashed_key = Bytes::copy_from_slice(keccak256(B256::from(*storage_key)).as_slice());
+            // 	println!("test account storage, acc: {:?}: {:?}, {:?}", test_account, hashed_key, storage_value);
+            // }
+
             if !storage_value.is_changed() {
                 continue;
             }
@@ -63,7 +74,7 @@ pub fn prepare_change_set<'a>(
                 // @efficienty, alloy_fixed encoding
                 let value = Bytes::from(alloy_rlp::encode(value));
                 storage_updates_keys.push(hashed_key);
-                storage_deleted_keys.push(value);
+                storage_updates_values.push(value);
             }
         }
         storage_trie_updated_keys.push(storage_updates_keys);

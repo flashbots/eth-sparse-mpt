@@ -92,13 +92,13 @@ impl SparseTrieNode {
         }
     }
 
-    pub fn new_ext_node(key: Nibbles) -> Self {
+    pub fn new_ext_node(key: Nibbles, child_rpl_pointer: Option<Bytes>) -> Self {
         Self {
             kind: SparseTrieNodeKind::ExtensionNode(ExtensionNode {
                 key,
                 child: NodePointer {
-                    rlp_pointer: Bytes::new(),
-                    rlp_pointer_dirty: true,
+                    rlp_pointer_dirty: child_rpl_pointer.is_none(),
+                    rlp_pointer: child_rpl_pointer.unwrap_or_else(|| Bytes::new()),
                 },
             }),
             rlp_pointer: Bytes::new(),
@@ -106,16 +106,21 @@ impl SparseTrieNode {
         }
     }
 
-    pub fn new_branch_node(n1: u8, n2: u8) -> Self {
+    pub fn new_branch_node(
+        n1: u8,
+        n1_rlp_pointer: Option<Bytes>,
+        n2: u8,
+        n2_rlp_pointer: Option<Bytes>,
+    ) -> Self {
         const ARRAY_REPEAT_VALUE: Option<NodePointer> = None;
         let mut children = Box::new([ARRAY_REPEAT_VALUE; 16]);
         children[n1 as usize] = Some(NodePointer {
-            rlp_pointer_dirty: true,
-            rlp_pointer: Bytes::new(),
+            rlp_pointer_dirty: n1_rlp_pointer.is_none(),
+            rlp_pointer: n1_rlp_pointer.unwrap_or_else(|| Bytes::new()),
         });
         children[n2 as usize] = Some(NodePointer {
-            rlp_pointer_dirty: true,
-            rlp_pointer: Bytes::new(),
+            rlp_pointer_dirty: n2_rlp_pointer.is_none(),
+            rlp_pointer: n2_rlp_pointer.unwrap_or_else(|| Bytes::new()),
         });
         Self {
             kind: SparseTrieNodeKind::BranchNode(BranchNode {

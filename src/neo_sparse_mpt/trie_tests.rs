@@ -13,10 +13,10 @@ fn compare_impls_with_hashing(data: &[(Vec<u8>, Vec<u8>)], insert_hashing: bool)
         trie.insert(key.clone().into(), value.clone().into())
             .expect("can't insert");
         if insert_hashing {
-            trie.hash_seq().expect("must hash after insert");
+            trie.root_hash().expect("must hash after insert");
         }
     }
-    let got = trie.hash_seq().expect("hashing failed");
+    let got = trie.root_hash().expect("hashing failed");
     assert_eq!(
         got, expected,
         "comparing hashing, insert_hashing: {}",
@@ -24,9 +24,51 @@ fn compare_impls_with_hashing(data: &[(Vec<u8>, Vec<u8>)], insert_hashing: bool)
     );
 }
 
+fn convert_input_to_bytes(input: &[(Vec<u8>, Vec<u8>)]) -> Vec<(Bytes, Bytes)> {
+    input
+        .into_iter()
+        .map(|(k, v)| (k.clone().into(), v.clone().into()))
+        .collect()
+}
+
+fn compare_sparse_impl(data: &[(Vec<u8>, Vec<u8>)], insert_hashing: bool) {
+    let expected = reference_trie_hash(data);
+
+    let mut data = convert_input_to_bytes(data);
+
+    let (last, data) = if let Some(last) = data.pop() {
+        (vec![last], data)
+    } else {
+        (vec![], data)
+    };
+
+    let mut trie = SparseTrieNodes::empty_trie();
+    for (key, value) in data {
+        trie.insert(key, value).expect("can't insert");
+        if insert_hashing {
+            trie.root_hash().expect("must hash");
+        }
+    }
+    trie.root_hash().expect("must hash");
+
+    let changed_keys = last.iter().map(|(k, _)| k.clone()).collect::<Vec<_>>();
+    let mut gathered_trie = trie
+        .gather_subtrie(&changed_keys, &[])
+        .expect("gather must work");
+    for (k, v) in last {
+        gathered_trie
+            .insert(k, v)
+            .expect("can't insert into gathered trie");
+    }
+    let got = gathered_trie.root_hash().expect("can't hash gathered trie");
+    assert_eq!(got, expected);
+}
+
 fn compare_impls(data: &[(Vec<u8>, Vec<u8>)]) {
     compare_impls_with_hashing(data, false);
     compare_impls_with_hashing(data, true);
+    compare_sparse_impl(data, false);
+    compare_sparse_impl(data, true);
 }
 
 #[test]
@@ -143,18 +185,74 @@ fn compare_with_removals_with_hashing(
         trie.insert(key.clone().into(), val.clone().into())
             .expect("must insert");
         if insert_hashing {
-            trie.hash_seq().expect("must hash after insert");
+            trie.root_hash().expect("must hash after insert");
         }
     }
 
     for key in remove {
         trie.delete(key.clone().into())?;
         if insert_hashing {
-            trie.hash_seq().expect("must hash after delete");
+            trie.root_hash().expect("must hash after delete");
         }
     }
 
-    let hash = trie.hash_seq().expect("must hash");
+    let hash = trie.root_hash().expect("must hash");
+    assert_eq!(
+        hash, reference_hash,
+        "comparing hashing, insert_hashing: {}",
+        insert_hashing
+    );
+
+    Ok(())
+}
+
+fn compare_with_removals_sparse(
+    data: &[(Vec<u8>, Vec<u8>)],
+    remove: &[Vec<u8>],
+    insert_hashing: bool,
+) -> Result<(), SparseTrieError> {
+    let removed_keys: HashSet<_> = remove.iter().cloned().collect();
+    let filtered_data: Vec<_> = data
+        .iter()
+        .filter(|(k, _)| !removed_keys.contains(k))
+        .cloned()
+        .collect();
+
+    let data = convert_input_to_bytes(data);
+
+    let reference_hash = reference_trie_hash(&filtered_data);
+
+    let mut trie = SparseTrieNodes::empty_trie();
+    for (key, val) in data {
+        trie.insert(key, val).expect("must insert");
+        if insert_hashing {
+            trie.root_hash().expect("must hash after insert");
+        }
+    }
+    trie.root_hash().expect("must hash");
+
+    let deleted_keys = remove
+        .iter()
+        .map(|r| Bytes::copy_from_slice(r))
+        .collect::<Vec<_>>();
+    let mut trie = trie
+        .gather_subtrie(&[], &deleted_keys)
+        .expect("failed to gather for removals");
+
+    dbg!(&trie);
+
+    for key in remove {
+        let key = key.clone().into();
+        println!("deleting: {:?}", key);
+        trie.delete(key)?;
+        if insert_hashing {
+            trie.root_hash().expect("must hash after delete");
+        }
+    }
+
+    dbg!(&trie);
+
+    let hash = trie.root_hash().expect("must hash");
     assert_eq!(
         hash, reference_hash,
         "comparing hashing, insert_hashing: {}",
@@ -170,7 +268,9 @@ fn compare_with_removals(
     print: bool,
 ) -> Result<(), SparseTrieError> {
     compare_with_removals_with_hashing(data, remove, false)?;
-    // compare_with_removals_with_hashing(data, remove, true)?;
+    compare_with_removals_with_hashing(data, remove, true)?;
+    compare_with_removals_sparse(data, remove, false)?;
+    compare_with_removals_sparse(data, remove, true)?;
     Ok(())
 }
 
@@ -210,7 +310,6 @@ fn remove_extension_node_error() {
 
 // must panic
 #[test]
-#[should_panic]
 fn remove_branch_err() {
     let add = &[
         (vec![0x01, 0x10], vec![0x0a]),
@@ -220,7 +319,10 @@ fn remove_branch_err() {
 
     let remove = &[vec![0x01]];
 
-    compare_with_removals(add, remove, true).unwrap_or_default();
+    assert!(matches!(
+        compare_with_removals(add, remove, true).unwrap_err(),
+        SparseTrieError::KeyNotFound
+    ));
 }
 
 #[test]

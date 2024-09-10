@@ -36,7 +36,7 @@ fn add_elements_only_neo_sparse_trie_insert_and_hash(keys: &[Bytes], values: &[B
         trie.insert(key.clone(), value.clone())
             .expect("can't insert");
     }
-    trie.hash_seq().expect("must hash")
+    trie.root_hash().expect("must hash")
 }
 
 fn neo_trie_insert_only(c: &mut Criterion) {
