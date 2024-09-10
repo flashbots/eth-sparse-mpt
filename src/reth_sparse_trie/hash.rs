@@ -1,8 +1,6 @@
 use super::change_set::ETHTrieChangeSet;
-use crate::neo_sparse_mpt::SparseTrieError;
-use crate::neo_sparse_mpt::SparseTrieNodes;
+use crate::sparse_mpt::SparseTrieNodes;
 use ahash::HashMap;
-use alloy_primitives::hex_literal::hex;
 use alloy_primitives::{Bytes, B256};
 use alloy_rlp::Encodable;
 use eyre::WrapErr;

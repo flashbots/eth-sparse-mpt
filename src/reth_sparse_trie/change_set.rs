@@ -1,7 +1,4 @@
-use ahash::HashMap;
-use alloy_primitives::hex_literal::hex;
-use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
-use reth_trie::Nibbles;
+use alloy_primitives::{keccak256, Address, Bytes, B256};
 use revm::db::BundleAccount;
 use revm_primitives::AccountInfo;
 

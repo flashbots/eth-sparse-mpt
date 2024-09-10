@@ -7,10 +7,6 @@ pub fn concat_path(p1: &Nibbles, p2: &[u8]) -> Nibbles {
     result
 }
 
-pub fn strip_first_nibble(p: Nibbles) -> (u8, Nibbles) {
-    (p[0], Nibbles::from_nibbles_unchecked(&p[1..]))
-}
-
 pub fn strip_first_nibble_mut(p: &mut Nibbles) -> u8 {
     let nibble = p[0];
     let vec = p.as_mut_vec_unchecked();

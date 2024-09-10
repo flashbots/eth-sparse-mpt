@@ -2,10 +2,9 @@ use ahash::HashMap;
 use std::sync::{Arc, Mutex};
 
 use super::change_set::ETHTrieChangeSet;
-use super::internal::EthSparseTries;
+use super::hash::EthSparseTries;
 use super::trie_fetcher::MultiProof;
-use crate::neo_sparse_mpt::{SparseTrieError, SparseTrieNodes};
-use alloy_primitives::hex_literal::hex;
+use crate::sparse_mpt::{SparseTrieError, SparseTrieNodes};
 use alloy_primitives::Bytes;
 use alloy_trie::Nibbles;
 
@@ -25,6 +24,10 @@ pub struct MissingNodes {
 impl MissingNodes {
     pub fn is_empty(&self) -> bool {
         self.account_trie_nodes.is_empty() && self.storage_trie_nodes.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.account_trie_nodes.len() + self.storage_trie_nodes.values().map(|n| n.len()).sum::<usize>()
     }
 }
 
@@ -53,13 +56,6 @@ struct RethSparseTrieShareCacheInternal {
 }
 
 impl RethSparseTrieShareCacheInternal {
-    fn new() -> Self {
-        Self {
-            account_trie: SparseTrieNodes::uninit_trie(),
-            storage_tries: HashMap::default(),
-        }
-    }
-
     pub fn gather_tries_for_changes(
         &mut self,
         change_set: &ETHTrieChangeSet,
@@ -129,7 +125,6 @@ impl RethSparseTrieShareCacheInternal {
         self.account_trie
             .add_nodes(multiproof.account_subtree.into_iter())?;
         for (account, storge_proofs) in multiproof.storages {
-            let acc = account.clone();
             let account = Bytes::copy_from_slice(account.as_slice());
             let storage_trie = self.storage_tries.entry(account).or_default();
             storage_trie.add_nodes(storge_proofs.subtree.into_iter())?;

@@ -1,12 +1,10 @@
-use crate::neo_sparse_mpt::SparseTrieNodes;
-use crate::reth_sparse_trie::trie_fetcher::TrieFetcher;
-use crate::reth_sparse_trie::MissingNodes;
-use crate::utils::{pretty_print_trie_nodes, reference_trie_hash};
+use super::*;
+use crate::reth_sparse_trie::shared_cache::MissingNodes;
+use crate::sparse_mpt::SparseTrieNodes;
 use ahash::HashMap;
 use alloy_primitives::{hex, keccak256, Bytes, B256, U256};
-use alloy_rlp::{Decodable, Encodable};
-use alloy_trie::nodes::TrieNode;
-use alloy_trie::{HashBuilder, Nibbles, EMPTY_ROOT_HASH};
+use alloy_rlp::Encodable;
+use alloy_trie::{Nibbles, EMPTY_ROOT_HASH};
 use reth::primitives::{Account, StorageEntry};
 use reth::providers::test_utils::create_test_provider_factory;
 use reth::providers::ProviderFactory;
@@ -16,7 +14,7 @@ use reth_db::database::Database;
 use reth_db::tables;
 use reth_db::transaction::DbTxMut;
 use reth_provider::providers::ConsistentDbView;
-use reth_trie::{StateRoot, StorageRoot, TrieAccount};
+use reth_trie::{StateRoot, TrieAccount};
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 
 #[derive(Debug)]

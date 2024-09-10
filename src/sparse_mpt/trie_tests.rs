@@ -1,6 +1,7 @@
 use crate::utils::reference_trie_hash;
 use ahash::HashSet;
 use alloy_primitives::hex;
+use eyre::Context;
 use proptest::prelude::any;
 use proptest::proptest;
 
@@ -239,18 +240,13 @@ fn compare_with_removals_sparse(
         .gather_subtrie(&[], &deleted_keys)
         .expect("failed to gather for removals");
 
-    dbg!(&trie);
-
     for key in remove {
         let key = key.clone().into();
-        println!("deleting: {:?}", key);
         trie.delete(key)?;
         if insert_hashing {
             trie.root_hash().expect("must hash after delete");
         }
     }
-
-    dbg!(&trie);
 
     let hash = trie.root_hash().expect("must hash");
     assert_eq!(
@@ -262,15 +258,13 @@ fn compare_with_removals_sparse(
     Ok(())
 }
 
-fn compare_with_removals(
-    data: &[(Vec<u8>, Vec<u8>)],
-    remove: &[Vec<u8>],
-    print: bool,
-) -> Result<(), SparseTrieError> {
-    compare_with_removals_with_hashing(data, remove, false)?;
-    compare_with_removals_with_hashing(data, remove, true)?;
-    compare_with_removals_sparse(data, remove, false)?;
-    compare_with_removals_sparse(data, remove, true)?;
+fn compare_with_removals(data: &[(Vec<u8>, Vec<u8>)], remove: &[Vec<u8>]) -> eyre::Result<()> {
+    compare_with_removals_with_hashing(data, remove, false)
+        .with_context(|| "normal hashing: true")?;
+    compare_with_removals_with_hashing(data, remove, true)
+        .with_context(|| "normal hashing: false")?;
+    compare_with_removals_sparse(data, remove, false).with_context(|| "sparse hashing: false")?;
+    compare_with_removals_sparse(data, remove, true).with_context(|| "sparse hashing: true")?;
     Ok(())
 }
 
@@ -280,7 +274,7 @@ fn remove_empty_trie_err() {
 
     let remove = &[vec![0x12]];
 
-    compare_with_removals(add, remove, true).unwrap_err();
+    let _ = compare_with_removals(add, remove).unwrap_err();
 }
 
 #[test]
@@ -289,7 +283,7 @@ fn remove_leaf() {
 
     let remove = &[vec![0x11]];
 
-    compare_with_removals(add, remove, true).unwrap();
+    compare_with_removals(add, remove).unwrap();
 }
 
 #[test]
@@ -298,7 +292,7 @@ fn remove_leaf_key_error() {
 
     let remove = &[vec![0x12]];
 
-    compare_with_removals(add, remove, true).unwrap_err();
+    let _ = compare_with_removals(add, remove).unwrap_err();
 }
 
 #[test]
@@ -306,6 +300,8 @@ fn remove_extension_node_error() {
     let add = &[(vec![0x11, 0x1], vec![0x0a]), (vec![0x11, 0x2], vec![0x0b])];
 
     let remove = &[vec![0x12]];
+
+    let _ = compare_with_removals(add, remove).unwrap_err();
 }
 
 // must panic
@@ -320,7 +316,10 @@ fn remove_branch_err() {
     let remove = &[vec![0x01]];
 
     assert!(matches!(
-        compare_with_removals(add, remove, true).unwrap_err(),
+        compare_with_removals(add, remove)
+            .unwrap_err()
+            .downcast::<SparseTrieError>()
+            .expect("incorrect error"),
         SparseTrieError::KeyNotFound
     ));
 }
@@ -335,7 +334,7 @@ fn remove_branch_leave_2_children() {
 
     let remove = &[vec![0x01]];
 
-    compare_with_removals(add, remove, true).unwrap();
+    compare_with_removals(add, remove).unwrap();
 }
 
 #[test]
@@ -349,7 +348,7 @@ fn remove_branch_leave_1_children_leaf_below_branch_above() {
 
     let remove = &[vec![0x11]];
 
-    compare_with_removals(add, remove, true).unwrap();
+    compare_with_removals(add, remove).unwrap();
 }
 
 #[test]
@@ -364,7 +363,7 @@ fn remove_branch_leave_1_children_branch_below_branch_above() {
 
     let remove = &[vec![0x11, 0x00]];
 
-    compare_with_removals(add, remove, true).unwrap();
+    compare_with_removals(add, remove).unwrap();
 }
 
 #[test]
@@ -379,7 +378,7 @@ fn remove_branch_leave_1_children_ext_below_branch_above() {
 
     let remove = &[vec![0x11, 0x00, 0x00]];
 
-    compare_with_removals(add, remove, true).unwrap();
+    compare_with_removals(add, remove).unwrap();
 }
 
 #[test]
@@ -388,7 +387,7 @@ fn remove_branch_leave_1_children_leaf_below_ext_above() {
 
     let remove = &[vec![0x11]];
 
-    compare_with_removals(add, remove, true).unwrap();
+    compare_with_removals(add, remove).unwrap();
 }
 
 #[test]
@@ -401,7 +400,7 @@ fn remove_branch_leave_1_children_branch_below_ext_above() {
 
     let remove = &[vec![0x11, 0x00]];
 
-    compare_with_removals(add, remove, true).unwrap();
+    compare_with_removals(add, remove).unwrap();
 }
 
 #[test]
@@ -414,7 +413,7 @@ fn remove_branch_leave_1_children_branch_below_null_above() {
 
     let remove = &[vec![0x10]];
 
-    compare_with_removals(add, remove, true).unwrap();
+    compare_with_removals(add, remove).unwrap();
 }
 
 #[test]
@@ -427,7 +426,7 @@ fn remove_branch_leave_1_children_ext_below_null_above() {
 
     let remove = &[vec![0x10, 0x00]];
 
-    compare_with_removals(add, remove, true).unwrap();
+    compare_with_removals(add, remove).unwrap();
 }
 
 #[test]
@@ -436,7 +435,7 @@ fn remove_branch_leave_1_children_leaf_below_null_above() {
 
     let remove = &[vec![0x10, 0x00]];
 
-    compare_with_removals(add, remove, true).unwrap();
+    compare_with_removals(add, remove).unwrap();
 }
 
 #[test]
@@ -449,11 +448,11 @@ fn remove_branch_leave_1_children_ext_below_ext_above() {
 
     let remove = &[vec![0x11, 0x00]];
 
-    compare_with_removals(add, remove, true).unwrap();
+    compare_with_removals(add, remove).unwrap();
 }
 
 #[test]
-fn failing_test_1() {
+fn failing_proptest_1() {
     let add = &[
         (vec![0xea, 0xbc, 0x01], vec![0x0a]),
         (vec![0xea, 0xbc, 0x10], vec![0x0b]),
@@ -461,7 +460,22 @@ fn failing_test_1() {
 
     let remove = &[vec![0xea, 0xbc, 0x10]];
 
-    compare_with_removals(add, remove, true).unwrap();
+    compare_with_removals(add, remove).unwrap();
+}
+
+#[test]
+fn check_correct_gather_for_orphan_of_and_orphan() {
+    // here we have 2 branch nodes with 2 children and both of them might have an orphan
+    // the orphan of the branch 1 is branch 2 so its added to the result using different code path
+    let add = &[
+        (vec![0x00, 0x00, 0x00], vec![0x0a]),
+        (vec![0x09, 0x00, 0x00], vec![0x0b]),
+        (vec![0x09, 0x10, 0x00], vec![0x0c]),
+    ];
+
+    let remove = &[vec![0x00, 0x00, 0x00], vec![0x09, 0x00, 0x00]];
+
+    compare_with_removals(add, remove).unwrap();
 }
 
 proptest! {
@@ -502,7 +516,7 @@ proptest! {
             }
             (k.to_vec(), v)
         }).collect();
-        compare_with_removals(&data, &keys_to_remove, false).unwrap()
+        compare_with_removals(&data, &keys_to_remove).unwrap()
     }
 }
 
@@ -514,7 +528,8 @@ fn assert_corect_gather(
 ) {
     let mut trie = SparseTrieNodes::empty_trie();
     for (key, value) in add {
-        trie.insert(key.clone().into(), value.clone().into());
+        trie.insert(key.clone().into(), value.clone().into())
+            .expect("insert must work");
     }
     let changed_keys = changed
         .iter()

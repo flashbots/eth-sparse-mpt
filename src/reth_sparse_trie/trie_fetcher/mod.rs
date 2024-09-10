@@ -1,3 +1,4 @@
+#[cfg(test)]
 mod toy_trie_tests;
 
 use ahash::{HashMap, HashMapExt, HashSet};
@@ -18,6 +19,12 @@ use super::shared_cache::MissingNodes;
 pub struct MultiProof {
     pub account_subtree: HashMap<Nibbles, Bytes>,
     pub storages: HashMap<B256, StorageMultiProof>,
+}
+
+impl MultiProof {
+    pub fn len(&self) -> usize {
+	self.account_subtree.len() + self.storages.values().map(|v| v.subtree.len()).sum::<usize>()
+    }
 }
 
 impl From<RethMultiProof> for MultiProof {
@@ -86,9 +93,9 @@ where
         Self { tx }
     }
 
-    pub fn fetch_missing_nodes(&self, mut missing_nodes: MissingNodes) -> eyre::Result<MultiProof> {
+    pub fn fetch_missing_nodes(&self, missing_nodes: MissingNodes) -> eyre::Result<MultiProof> {
         // println!("mutliproof missing nodes: {:#?}", missing_nodes);
-        let mut proof = Proof::new(
+        let proof = Proof::new(
             DatabaseTrieCursorFactory::new(self.tx),
             DatabaseHashedCursorFactory::new(self.tx),
         );

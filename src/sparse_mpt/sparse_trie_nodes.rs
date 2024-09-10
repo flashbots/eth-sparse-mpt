@@ -1,11 +1,10 @@
-use ahash::HashMap;
 use alloy_primitives::keccak256;
-use alloy_primitives::{Bytes, B256};
-use alloy_rlp::{length_of_length, Buf, BufMut, Decodable, Encodable, Header, EMPTY_STRING_CODE};
+use alloy_primitives::Bytes;
+use alloy_rlp::{length_of_length, BufMut, Decodable, Encodable, Header, EMPTY_STRING_CODE};
 use alloy_trie::nodes::word_rlp;
 use alloy_trie::nodes::{
-    BranchNode as AlloyBranchNode, BranchNodeRef, ExtensionNode as AlloyExtensionNode,
-    ExtensionNodeRef, LeafNode as AlloyLeafNode, LeafNodeRef, TrieNode as AlloyTrieNode,
+    BranchNode as AlloyBranchNode, ExtensionNode as AlloyExtensionNode, ExtensionNodeRef,
+    LeafNode as AlloyLeafNode, LeafNodeRef, TrieNode as AlloyTrieNode,
 };
 use alloy_trie::Nibbles;
 
@@ -74,14 +73,6 @@ impl SparseTrieNode {
             self.rlp_pointer_dirty = false;
         }
         self.rlp_pointer.clone()
-    }
-
-    pub fn rlp_pointer_slow(&self) -> Bytes {
-        if self.rlp_pointer_dirty {
-            return self.kind.rlp_pointer_slow();
-        } else {
-            self.rlp_pointer.clone()
-        }
     }
 
     pub fn new_leaf_node(key: Nibbles, value: Bytes) -> Self {
