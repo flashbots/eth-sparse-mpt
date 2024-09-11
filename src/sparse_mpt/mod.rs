@@ -26,7 +26,7 @@ pub enum SparseTrieError {
 
 #[derive(Debug, Clone, Default)]
 pub struct SparseTrieNodes {
-    nodes: HashMap<Nibbles, SparseTrieNode>,
+    pub nodes: HashMap<Nibbles, SparseTrieNode>,
 }
 
 struct NodeCursor {
@@ -622,6 +622,33 @@ impl SparseTrieNodes {
             .remove(path)
             .ok_or_else(|| SparseTrieError::NodeNotFound(path.clone()))
     }
+
+    /// O(n)
+    pub fn count_nodes(&self) -> NodeCount {
+        let mut count = NodeCount::default();
+        for node in self.nodes.values() {
+            match &node.kind {
+                SparseTrieNodeKind::LeafNode(_) => {
+                    count.leaf += 1;
+                }
+                SparseTrieNodeKind::ExtensionNode(_) => {
+                    count.extension += 1;
+                }
+                SparseTrieNodeKind::BranchNode(_) => {
+                    count.branch += 1;
+                }
+                _ => {}
+            }
+        }
+        count
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct NodeCount {
+    pub leaf: usize,
+    pub extension: usize,
+    pub branch: usize,
 }
 
 #[derive(Debug, Clone)]
