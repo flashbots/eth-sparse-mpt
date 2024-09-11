@@ -5,3 +5,5 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 475d85444003f02b164c02a183894de1c112dcee4e7c5cc1af6c4ad9bbfe539f # shrinks to key_values = [(([0, 0, 0], true), []), (([9, 0, 0], true), []), (([9, 16, 0], false), [])]
+cc f9d7cdc328130f02092a19598791def3637a5bc9e22da92877bb9133eb041e9a # shrinks to key_values = [(([0, 0, 0], true), []), (([10, 64, 0], false), []), (([10, 64, 1], false), [])]
+cc bdb195df9c8af647ce1d26bdbc932aa2b2a18ba64c652c0e1c7d76fe0d4581ba # shrinks to key_values = [([66, 144, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], []), ([66, 144, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], []), ([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [])]

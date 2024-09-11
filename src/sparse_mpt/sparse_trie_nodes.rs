@@ -1,3 +1,4 @@
+use ahash::HashMap;
 use alloy_primitives::keccak256;
 use alloy_primitives::Bytes;
 use alloy_rlp::{length_of_length, BufMut, Decodable, Encodable, Header, EMPTY_STRING_CODE};
@@ -71,6 +72,21 @@ impl SparseTrieNode {
         if self.rlp_pointer_dirty {
             self.rlp_pointer = self.kind.rlp_pointer_slow();
             self.rlp_pointer_dirty = false;
+        }
+        self.rlp_pointer.clone()
+    }
+
+    pub fn rlp_pointer_cached(&mut self, cache: &mut HashMap<SparseTrieNodeKind, Bytes>) -> Bytes {
+        if self.rlp_pointer_dirty {
+            if let Some(cached) = cache.get(&self.kind) {
+                self.rlp_pointer = cached.clone();
+                self.rlp_pointer_dirty = false;
+            } else {
+                let value = self.kind.rlp_pointer_slow();
+                cache.insert(self.kind.clone(), value.clone());
+                self.rlp_pointer = value;
+                self.rlp_pointer_dirty = false;
+            }
         }
         self.rlp_pointer.clone()
     }

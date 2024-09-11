@@ -3,8 +3,10 @@ use std::fs::read_to_string;
 use ahash::HashMap;
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
 use eth_sparse_mpt::reth_sparse_trie::change_set::ETHTrieChangeSet;
+use eth_sparse_mpt::reth_sparse_trie::hash::EthSparseTries;
 use eth_sparse_mpt::reth_sparse_trie::trie_fetcher::MultiProof;
 use eth_sparse_mpt::reth_sparse_trie::RethSparseTrieSharedCache;
+use eth_sparse_mpt::sparse_mpt::SparseTrieNodes;
 
 fn get_test_mutliproofs() -> Vec<MultiProof> {
     let files = [
@@ -22,6 +24,38 @@ fn get_test_mutliproofs() -> Vec<MultiProof> {
 fn get_change_set() -> ETHTrieChangeSet {
     let data = read_to_string("./test_data/changeset.json").expect("reading changeset");
     serde_json::from_str(&data).expect("parsing changeset")
+}
+
+fn get_storage_tries(changes: &ETHTrieChangeSet, tries: &EthSparseTries) -> Vec<SparseTrieNodes> {
+    let mut storage_tries = Vec::new();
+    for (_, account) in changes.account_trie_updates.iter().enumerate() {
+        storage_tries.push(
+            tries
+                .storage_tries
+                .get(account)
+                .expect("storage trie must exist")
+                .clone(),
+        );
+    }
+    storage_tries
+}
+
+fn apply_storage_tries_changes<'a>(
+    storage_tries: impl Iterator<Item = &'a mut SparseTrieNodes>,
+    changes: &ETHTrieChangeSet,
+) {
+    for (i, trie) in storage_tries.enumerate() {
+        let keys = &changes.storage_trie_updated_keys[i];
+        let value = &changes.storage_trie_updated_values[i];
+        let deletes = &changes.storage_trie_deleted_keys[i];
+        for (k, v) in keys.iter().zip(value) {
+            trie.insert(k.clone(), v.clone())
+                .expect("must insert storage trie");
+        }
+        for d in deletes {
+            trie.delete(d.clone()).expect("must delete storage trie");
+        }
+    }
 }
 
 fn gather_nodes(c: &mut Criterion) {
@@ -45,7 +79,7 @@ fn gather_nodes(c: &mut Criterion) {
     });
 }
 
-fn root_hash(c: &mut Criterion) {
+fn root_hash_main_trie(c: &mut Criterion) {
     let multiproof = get_test_mutliproofs();
     let changes = get_change_set();
 
@@ -67,10 +101,22 @@ fn root_hash(c: &mut Criterion) {
         trie.delete(key).expect("must update");
     }
 
-    c.bench_function("root_hash", |b| {
+    c.bench_function("root_hash_main_trie_no_cache", |b| {
         b.iter_batched(
             || trie.clone(),
-            |mut trie| trie.root_hash(),
+            |mut trie| trie.root_hash().expect("must hash"),
+            BatchSize::SmallInput,
+        );
+    });
+
+    let mut root_hash_cache = HashMap::default();
+    c.bench_function("root_hash_main_trie_with_cache", |b| {
+        b.iter_batched(
+            || trie.clone(),
+            |mut trie| {
+                trie.root_hash_no_recursion(Some(&mut root_hash_cache))
+                    .expect("must hash")
+            },
             BatchSize::SmallInput,
         );
     });
@@ -91,60 +137,24 @@ fn root_hash_accounts(c: &mut Criterion) {
         .gather_tries_for_changes(&changes)
         .expect("gather must succed");
 
-    // let mut storage_tries = Vec::new();
-    // for (_, account) in changes.account_trie_updates.iter().enumerate() {
-    //     storage_tries.push(
-    //         tries
-    //             .storage_tries
-    //             .get(account)
-    //             .expect("storage trie must exist")
-    //             .clone(),
-    //     );
-    // }
-    // for (i, mut trie) in storage_tries.into_iter().enumerate() {
-    // 	let start = std::time::Instant::now();
-    //     let keys = &changes.storage_trie_updated_keys[i];
-    //     let value = &changes.storage_trie_updated_values[i];
-    //     let deletes = &changes.storage_trie_deleted_keys[i];
-    //     for (k, v) in keys.iter().zip(value) {
-    //         trie.insert(k.clone(), v.clone())
-    //             .expect("must insert storage trie");
-    //     }
-    //     for d in deletes {
-    //         trie.delete(d.clone()).expect("must delete storage trie");
-    //     }
-    //     trie.root_hash().expect("must hash storage trie");
-    // 	println!("{:<4} {:<5}, chng: {:<3}, del: {:<3}",i, start.elapsed().as_micros(), keys.len(), deletes.len());
-    // }
-    // panic!();
-
     c.bench_function("root_hash_accounts_insert", |b| {
         b.iter_batched(
-            || {
-                let mut storage_tries = Vec::new();
-                for (_, account) in changes.account_trie_updates.iter().enumerate() {
-                    storage_tries.push(
-                        tries
-                            .storage_tries
-                            .get(account)
-                            .expect("storage trie must exist")
-                            .clone(),
-                    );
-                }
-                storage_tries
+            || get_storage_tries(&changes, &tries),
+            |mut storage_tries| {
+                apply_storage_tries_changes(storage_tries.iter_mut(), &changes);
             },
-            |storage_tries| {
-                for (i, mut trie) in storage_tries.into_iter().enumerate() {
-                    let keys = &changes.storage_trie_updated_keys[i];
-                    let value = &changes.storage_trie_updated_values[i];
-                    let deletes = &changes.storage_trie_deleted_keys[i];
-                    for (k, v) in keys.iter().zip(value) {
-                        trie.insert(k.clone(), v.clone())
-                            .expect("must insert storage trie");
-                    }
-                    for d in deletes {
-                        trie.delete(d.clone()).expect("must delete storage trie");
-                    }
+            BatchSize::SmallInput,
+        );
+    });
+
+    c.bench_function("root_hash_accounts_hash_no_recursion_no_cache", |b| {
+        b.iter_batched(
+            || get_storage_tries(&changes, &tries),
+            |mut storage_tries| {
+                apply_storage_tries_changes(storage_tries.iter_mut(), &changes);
+                for trie in storage_tries.iter_mut() {
+                    trie.root_hash_no_recursion(None)
+                        .expect("must hash storage trie");
                 }
             },
             BatchSize::SmallInput,
@@ -152,33 +162,41 @@ fn root_hash_accounts(c: &mut Criterion) {
     });
 
     let mut root_hash_cache = HashMap::default();
-    c.bench_function("root_hash_accounts_hash", |b| {
+    c.bench_function("root_hash_accounts_hash_no_recursion_with_cache", |b| {
         b.iter_batched(
-            || {
-                let mut storage_tries = Vec::new();
-                for (_, account) in changes.account_trie_updates.iter().enumerate() {
-                    storage_tries.push(
-                        tries
-                            .storage_tries
-                            .get(account)
-                            .expect("storage trie must exist")
-                            .clone(),
-                    );
+            || get_storage_tries(&changes, &tries),
+            |mut storage_tries| {
+                apply_storage_tries_changes(storage_tries.iter_mut(), &changes);
+                for trie in storage_tries.iter_mut() {
+                    trie.root_hash_no_recursion(Some(&mut root_hash_cache))
+                        .expect("must hash storage trie");
                 }
-                storage_tries
             },
-            |storage_tries| {
-                for (i, mut trie) in storage_tries.into_iter().enumerate() {
-                    let keys = &changes.storage_trie_updated_keys[i];
-                    let value = &changes.storage_trie_updated_values[i];
-                    let deletes = &changes.storage_trie_deleted_keys[i];
-                    for (k, v) in keys.iter().zip(value) {
-                        trie.insert(k.clone(), v.clone())
-                            .expect("must insert storage trie");
-                    }
-                    for d in deletes {
-                        trie.delete(d.clone()).expect("must delete storage trie");
-                    }
+            BatchSize::SmallInput,
+        );
+    });
+
+    c.bench_function("root_hash_old_accounts_hash_no_cache", |b| {
+        b.iter_batched(
+            || get_storage_tries(&changes, &tries),
+            |mut storage_tries| {
+                apply_storage_tries_changes(storage_tries.iter_mut(), &changes);
+                for trie in storage_tries.iter_mut() {
+                    trie.root_hash_advanced(false, None)
+                        .expect("must hash storage trie");
+                }
+            },
+            BatchSize::SmallInput,
+        );
+    });
+
+    let mut root_hash_cache = HashMap::default();
+    c.bench_function("root_hash_old_accounts_hash_with_cache", |b| {
+        b.iter_batched(
+            || get_storage_tries(&changes, &tries),
+            |mut storage_tries| {
+                apply_storage_tries_changes(storage_tries.iter_mut(), &changes);
+                for trie in storage_tries.iter_mut() {
                     trie.root_hash_advanced(false, Some(&mut root_hash_cache))
                         .expect("must hash storage trie");
                 }
@@ -188,5 +206,10 @@ fn root_hash_accounts(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, gather_nodes, root_hash, root_hash_accounts);
+criterion_group!(
+    benches,
+    gather_nodes,
+    root_hash_main_trie,
+    root_hash_accounts
+);
 criterion_main!(benches);
