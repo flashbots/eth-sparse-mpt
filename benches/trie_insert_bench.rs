@@ -69,6 +69,16 @@ fn gather_nodes(c: &mut Criterion) {
             .expect("populate shared cache")
     }
 
+    let tries = shared_cache.gather_tries_for_changes(&changes).unwrap();
+    println!("acc trie len: {}", tries.account_trie.len());
+
+    c.bench_function("gather_nodes_clone_acc_trie", |b| {
+        b.iter(|| {
+            let out = tries.clone();
+            black_box(out);
+        })
+    });
+
     c.bench_function("gather_nodes", |b| {
         b.iter(|| {
             let out = shared_cache

@@ -6,7 +6,7 @@ use alloy_rlp::Encodable;
 use eyre::WrapErr;
 use reth_trie::TrieAccount;
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct EthSparseTries {
     pub account_trie: SparseTrieNodes,
     pub storage_tries: HashMap<Bytes, SparseTrieNodes>,
