@@ -626,17 +626,18 @@ impl SparseTrieNodes {
     }
 
     pub fn root_hash(&mut self) -> Result<B256, SparseTrieError> {
-        self.root_hash_advanced(false).map(|(h, _)| h)
+        self.root_hash_advanced(false, None).map(|(h, _)| h)
     }
 
     pub fn root_hash_advanced(
         &mut self,
         rehash_all: bool,
+        hash_cache: Option<&mut HashMap<SparseTrieNodeKind, Bytes>>,
     ) -> Result<(B256, usize), SparseTrieError> {
         // @todo do without recursion and not hash map allocation
         let mut updates = HashMap::default();
         let root_node = Nibbles::new();
-        self.update_rlp_pointers(root_node.clone(), &mut updates, rehash_all)?;
+        self.update_rlp_pointers(root_node.clone(), &mut updates, rehash_all, hash_cache)?;
         let updated_nodes = updates.len();
         for (path, updated) in updates {
             self.nodes.insert(path, updated);
@@ -647,22 +648,23 @@ impl SparseTrieNodes {
         Ok((keccak256(&tmp_result), updated_nodes))
     }
 
-    fn update_rlp_pointers(
+    fn update_rlp_pointers<'a>(
         &self,
         node_path: Nibbles,
         updates: &mut HashMap<Nibbles, SparseTrieNode>,
         rehash_all: bool,
-    ) -> Result<(), SparseTrieError> {
+        mut hash_cache: Option<&'a mut HashMap<SparseTrieNodeKind, Bytes>>,
+    ) -> Result<Option<&'a mut HashMap<SparseTrieNodeKind, Bytes>>, SparseTrieError> {
         let node = self.try_get_node(&node_path)?;
         if !node.rlp_pointer_dirty && !rehash_all {
-            return Ok(());
+            return Ok(hash_cache);
         }
 
         let mut new_node = node.clone();
 
         match &mut new_node.kind {
-            SparseTrieNodeKind::NullNode => new_node.rlp_pointer(),
-            SparseTrieNodeKind::LeafNode(_) => new_node.rlp_pointer(),
+            SparseTrieNodeKind::NullNode => {}
+            SparseTrieNodeKind::LeafNode(_) => {}
             SparseTrieNodeKind::ExtensionNode(ext) => {
                 if ext.child.rlp_pointer_dirty || rehash_all {
                     let child_path = ext.child_path(&node_path);
@@ -672,7 +674,12 @@ impl SparseTrieNodes {
                         && !ext.child.rlp_pointer_dirty;
 
                     if !skip_child {
-                        self.update_rlp_pointers(child_path.clone(), updates, rehash_all)?;
+                        hash_cache = self.update_rlp_pointers(
+                            child_path.clone(),
+                            updates,
+                            rehash_all,
+                            hash_cache,
+                        )?;
                         let updated_child = if let Some(updated_child) = updates.get(&child_path) {
                             assert!(!updated_child.rlp_pointer_dirty);
                             updated_child.rlp_pointer.clone()
@@ -688,7 +695,6 @@ impl SparseTrieNodes {
                         ext.child.rlp_pointer_dirty = false;
                     }
                 }
-                new_node.rlp_pointer()
             }
             SparseTrieNodeKind::BranchNode(branch) => {
                 for (idx, child) in branch.children.iter_mut().enumerate() {
@@ -705,7 +711,12 @@ impl SparseTrieNodes {
                         && !self.nodes.contains_key(&child_path)
                         && !child.rlp_pointer_dirty;
                     if !skip_child {
-                        self.update_rlp_pointers(child_path.clone(), updates, rehash_all)?;
+                        hash_cache = self.update_rlp_pointers(
+                            child_path.clone(),
+                            updates,
+                            rehash_all,
+                            hash_cache,
+                        )?;
                         let updated_child = if let Some(updated_child) = updates.get(&child_path) {
                             assert!(!updated_child.rlp_pointer_dirty);
                             updated_child.rlp_pointer.clone()
@@ -721,12 +732,24 @@ impl SparseTrieNodes {
                         child.rlp_pointer_dirty = false;
                     }
                 }
-                new_node.rlp_pointer()
             }
         };
-        new_node.rlp_pointer_dirty = false;
+        if let Some(cache) = &mut hash_cache {
+            let value = if let Some(cached) = cache.get(&new_node.kind) {
+                cached.clone()
+            } else {
+                let value = new_node.rlp_pointer();
+                cache.insert(new_node.kind.clone(), value.clone());
+                value
+            };
+            new_node.rlp_pointer = value;
+            new_node.rlp_pointer_dirty = false;
+        } else {
+            new_node.rlp_pointer();
+            new_node.rlp_pointer_dirty = false;
+        }
         updates.insert(node_path, new_node);
-        Ok(())
+        Ok(hash_cache)
     }
 }
 
@@ -782,8 +805,8 @@ impl SparseTrieNodes {
                 };
                 if !result.nodes.contains_key(&c.current_node) {
                     add_node_to_result(c.current_node.clone(), node.clone(), &mut result);
-		}
-		let node = result
+                }
+                let node = result
                     .nodes
                     .get_mut(&c.current_node)
                     .expect("we insert it above");

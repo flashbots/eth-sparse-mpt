@@ -93,3 +93,7 @@ criterion = { version = "0.4", features = ["html_reports"] }
 [[bench]]
 name = "trie_insert_bench"
 harness = false
+
+[[bench]]
+name = "trie_nodes_benches"
+harness = false

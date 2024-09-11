@@ -8,7 +8,7 @@ use alloy_trie::nodes::{
 };
 use alloy_trie::Nibbles;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct NodePointer {
     // if Some than sparse trie contains the child
     // pub path: Option<Nibbles>,
@@ -124,7 +124,7 @@ impl SparseTrieNode {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SparseTrieNodeKind {
     NullNode,
     LeafNode(LeafNode),
@@ -155,13 +155,13 @@ impl Default for SparseTrieNodeKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Hash)]
 pub struct LeafNode {
     pub key: Nibbles,
     pub value: Bytes,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Hash)]
 pub struct ExtensionNode {
     pub key: Nibbles,
     pub child: NodePointer,
@@ -183,7 +183,7 @@ impl ExtensionNode {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Hash)]
 pub struct BranchNode {
     pub children: Box<[Option<NodePointer>; 16]>,
     pub aux_bits: u16,
