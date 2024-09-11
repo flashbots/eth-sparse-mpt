@@ -12,18 +12,27 @@ use reth_trie::proof::Proof;
 use reth_trie::{MultiProof as RethMultiProof, StorageMultiProof as RethStorageMultiProof};
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use serde::{Deserialize, Serialize};
+use serde_with::{serde_as, Seq};
 
 use super::shared_cache::MissingNodes;
 
+#[serde_as]
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct MultiProof {
+    #[serde_as(as = "Seq<(_, _)>")]
     pub account_subtree: HashMap<Nibbles, Bytes>,
+    #[serde_as(as = "Seq<(_, _)>")]
     pub storages: HashMap<B256, StorageMultiProof>,
 }
 
 impl MultiProof {
     pub fn len(&self) -> usize {
-	self.account_subtree.len() + self.storages.values().map(|v| v.subtree.len()).sum::<usize>()
+        self.account_subtree.len()
+            + self
+                .storages
+                .values()
+                .map(|v| v.subtree.len())
+                .sum::<usize>()
     }
 }
 
@@ -44,8 +53,10 @@ impl From<RethMultiProof> for MultiProof {
     }
 }
 
+#[serde_as]
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct StorageMultiProof {
+    #[serde_as(as = "Seq<(_, _)>")]
     pub subtree: HashMap<Nibbles, Bytes>,
 }
 

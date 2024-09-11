@@ -2430,6 +2430,7 @@ dependencies = [
  "revm-primitives",
  "serde",
  "serde_json",
+ "serde_with",
  "thiserror",
  "triehash",
 ]

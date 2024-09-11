@@ -27,7 +27,12 @@ impl MissingNodes {
     }
 
     pub fn len(&self) -> usize {
-        self.account_trie_nodes.len() + self.storage_trie_nodes.values().map(|n| n.len()).sum::<usize>()
+        self.account_trie_nodes.len()
+            + self
+                .storage_trie_nodes
+                .values()
+                .map(|n| n.len())
+                .sum::<usize>()
     }
 }
 
@@ -71,11 +76,13 @@ impl RethSparseTrieShareCacheInternal {
         // }
 
         // let test_account = Bytes::from(hex!("07dbc2fd98c6f6265f2b5c8ebddf898b06ff1b3d74b54abf9c68ec2cb61f46f1"));
+        let start = std::time::Instant::now();
         match self.account_trie.gather_subtrie(
             &change_set.account_trie_updates,
             &change_set.account_trie_deletes,
         ) {
             Ok(account_trie) => {
+                // println!("gathering for account trie, updates {:>4}, deletes {:>4} time_mus {}", change_set.account_trie_updates.len(), change_set.account_trie_deletes.len(), start.elapsed().as_micros());
                 // TODO debug stuff
                 // println!("account trie no missing nodes, trie_len: {}", account_trie.len());
                 // let test_account = Bytes::from(hex!("b50471e6e6c151b14c7a41e946fa8c89990ae42e8876ae25332d65f625d337fb"));
@@ -94,8 +101,10 @@ impl RethSparseTrieShareCacheInternal {
             let updates = &change_set.storage_trie_updated_keys[acc_idx];
             let deletes = &change_set.storage_trie_deleted_keys[acc_idx];
             let storage_trie = self.storage_tries.entry(account.clone()).or_default();
+            let start = std::time::Instant::now();
             match storage_trie.gather_subtrie(&updates, &deletes) {
                 Ok(storage_trie) => {
+                    // println!("gathering for storage trie: len {:>4}, updates {:>4} deletes {:>4} time_mus {}", storage_trie.len(), updates.len(), deletes.len(), start.elapsed().as_micros());
                     // if account == test_account {
                     // 	println!("test account trie {:?} {:#?}", account, storage_trie);
                     // }
@@ -129,6 +138,11 @@ impl RethSparseTrieShareCacheInternal {
             let storage_trie = self.storage_tries.entry(account).or_default();
             storage_trie.add_nodes(storge_proofs.subtree.into_iter())?;
         }
+
+        // println!("account trie size: {}", self.account_trie.len());
+        // for (_, s) in  &self.storage_tries {
+        //     println!("storage trie size: {}", s.len());
+        // }
         Ok(())
     }
 }

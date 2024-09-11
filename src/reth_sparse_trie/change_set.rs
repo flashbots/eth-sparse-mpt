@@ -1,7 +1,9 @@
 use alloy_primitives::{keccak256, Address, Bytes, B256};
 use revm::db::BundleAccount;
 use revm_primitives::AccountInfo;
+use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ETHTrieChangeSet {
     pub account_trie_deletes: Vec<Bytes>,
 
@@ -41,7 +43,7 @@ pub fn prepare_change_set<'a>(
             // account was modified
             Some(account) => {
                 account_trie_updates.push(hashed_address);
-                account_trie_updates_info.push(account);
+                account_trie_updates_info.push(account.without_code());
             }
             // account was destroyed
             None => {

@@ -5,19 +5,19 @@ use reth_db_api::database::Database;
 use reth_provider::providers::ConsistentDbView;
 use reth_provider::DatabaseProviderFactory;
 use reth_provider::ExecutionOutcome;
-use std::time::Instant;
 use std::time::Duration;
+use std::time::Instant;
 
 pub mod change_set;
 pub mod hash;
-pub mod shared_cache;
 pub mod local_cache;
+pub mod shared_cache;
 pub mod trie_fetcher;
 
 use self::trie_fetcher::*;
 
-pub use self::shared_cache::RethSparseTrieSharedCache;
 pub use self::local_cache::RethSparseTrieLocalCache;
+pub use self::shared_cache::RethSparseTrieSharedCache;
 
 #[derive(Debug, Clone, Default)]
 pub struct RethSparseTrieMetsics {
@@ -32,7 +32,7 @@ pub struct RethSparseTrieMetsics {
 }
 
 /// Calculate root hash for the given outcome on top of the block defined by consistent_db_view.
-/// * shared_cache should be created once for each parent block and it stores fethed pieces of the trie 
+/// * shared_cache should be created once for each parent block and it stores fethed pieces of the trie
 /// * blocking_task_pool - implemenation will use parallelism if set (not implemented right now)
 /// * local_cache - implemenation will use is to cache some operations.
 ///   It should be owned by one thread that computes root hash in a loop.
@@ -57,41 +57,59 @@ where
 
     let start = Instant::now();
     let change_set = prepare_change_set(outcome.bundle_accounts_iter());
-    metrics.change_set_time = start.elapsed();
+    metrics.change_set_time += start.elapsed();
+
+    // {
+    //     let change_set_json = serde_json::to_string_pretty(&change_set).expect("to json fail");
+    //     let mut file = std::fs::File::create("/tmp/changeset.json").unwrap();
+    //     file.write_all(change_set_json.as_bytes()).unwrap();
+    // }
 
     for _ in 0..3 {
-	metrics.fetch_iterations += 1;
         let start = Instant::now();
         let gather_result = shared_cache.gather_tries_for_changes(&change_set);
-	metrics.gather_nodes_time += start.elapsed();
+        metrics.gather_nodes_time += start.elapsed();
 
         let missing_nodes = match gather_result {
             Ok(mut tries) => {
                 return {
                     let start = Instant::now();
                     let root_hash_result = tries.calculate_root_hash(change_set);
-                    metrics.root_hash_time = start.elapsed();
+                    metrics.root_hash_time += start.elapsed();
                     (root_hash_result, metrics)
                 }
             }
             Err(missing_nodes) => missing_nodes,
         };
-	metrics.missing_nodes += missing_nodes.len();
+        metrics.missing_nodes += missing_nodes.len();
         let start = Instant::now();
         let multiproof = match fetcher.fetch_missing_nodes(missing_nodes) {
-	    Ok(ok) => ok,
-	    Err(err) => return (Err(err.into()), metrics),
-	};
+            Ok(ok) => ok,
+            Err(err) => return (Err(err.into()), metrics),
+        };
+        metrics.fetch_iterations += 1;
+
+        // {
+        //     let multiproof_json = serde_json::to_string_pretty(&multiproof).expect("to json fail");
+        //     let mut file = std::fs::File::create(&format!("/tmp/mutliproof_{}.json", i)).unwrap();
+        //     file.write_all(multiproof_json.as_bytes()).unwrap();
+        // }
+
         metrics.fetch_nodes_time += start.elapsed();
-	metrics.fetched_nodes += multiproof.len();
+        metrics.fetched_nodes += multiproof.len();
 
         let start = Instant::now();
         match shared_cache.update_cache_with_fetched_nodes(multiproof) {
-	    Err(err) => return (Err(err.into()), metrics),
-	    _ => {},
-	};
-        metrics.fill_cache_time = start.elapsed();
+            Err(err) => return (Err(err.into()), metrics),
+            _ => {}
+        };
+        metrics.fill_cache_time += start.elapsed();
     }
 
-    (Err(eyre::eyre!("failed to fetch enough data after 3 iterations")), metrics)
+    (
+        Err(eyre::eyre!(
+            "failed to fetch enough data after 3 iterations"
+        )),
+        metrics,
+    )
 }
