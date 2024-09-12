@@ -210,18 +210,12 @@ fn fetch_multiproof() {
         .add_nodes(missing_nodes.account_subtree.into_iter())
         .expect("must add nodes");
 
-    let (got_root_hash, nodes_updated) = sparse_trie
-        .root_hash_advanced(false, None)
-        .expect("must hash");
+    let got_root_hash = sparse_trie.root_hash().expect("must hash");
 
-    assert_eq!(nodes_updated, 1);
     assert_eq!(got_root_hash, reference_root_hash);
 
-    let (got_root_hash, nodes_updated) = sparse_trie
-        .root_hash_advanced(true, None)
-        .expect("must hash");
+    let got_root_hash = sparse_trie.root_hash().expect("must hash");
 
-    assert_eq!(nodes_updated, 7);
     assert_eq!(got_root_hash, reference_root_hash);
 }
 

@@ -189,35 +189,6 @@ fn root_hash_accounts(c: &mut Criterion) {
             BatchSize::SmallInput,
         );
     });
-
-    c.bench_function("root_hash_old_accounts_hash_no_cache", |b| {
-        b.iter_batched(
-            || get_storage_tries(&changes, &tries),
-            |mut storage_tries| {
-                apply_storage_tries_changes(storage_tries.iter_mut(), &changes);
-                for trie in storage_tries.iter_mut() {
-                    trie.root_hash_advanced(false, None)
-                        .expect("must hash storage trie");
-                }
-            },
-            BatchSize::SmallInput,
-        );
-    });
-
-    let mut root_hash_cache = HashMap::default();
-    c.bench_function("root_hash_old_accounts_hash_with_cache", |b| {
-        b.iter_batched(
-            || get_storage_tries(&changes, &tries),
-            |mut storage_tries| {
-                apply_storage_tries_changes(storage_tries.iter_mut(), &changes);
-                for trie in storage_tries.iter_mut() {
-                    trie.root_hash_advanced(false, Some(&mut root_hash_cache))
-                        .expect("must hash storage trie");
-                }
-            },
-            BatchSize::SmallInput,
-        );
-    });
 }
 
 criterion_group!(
