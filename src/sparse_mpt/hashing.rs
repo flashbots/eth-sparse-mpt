@@ -2,7 +2,6 @@ use ahash::HashMap;
 use alloy_primitives::keccak256;
 use alloy_primitives::Bytes;
 use alloy_primitives::B256;
-use alloy_rlp::Encodable;
 
 use super::*;
 

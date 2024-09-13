@@ -1,7 +1,7 @@
 use ahash::HashMap;
 use alloy_primitives::keccak256;
 use alloy_primitives::Bytes;
-use alloy_rlp::{length_of_length, BufMut, Decodable, Encodable, Header, EMPTY_STRING_CODE};
+use alloy_rlp::{BufMut, Decodable, Encodable, Header, EMPTY_STRING_CODE};
 use alloy_trie::nodes::word_rlp;
 use alloy_trie::nodes::{
     BranchNode as AlloyBranchNode, ExtensionNode as AlloyExtensionNode, ExtensionNodeRef,
@@ -249,28 +249,9 @@ impl From<AlloyLeafNode> for LeafNode {
     }
 }
 
-impl Decodable for LeafNode {
-    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        let alloy_leaf_node = AlloyLeafNode::decode(buf)?;
-        Ok(alloy_leaf_node.into())
-    }
-}
-
-impl Encodable for LeafNode {
-    fn encode(&self, out: &mut dyn BufMut) {
-        LeafNodeRef {
-            key: &self.key,
-            value: &self.value,
-        }
-        .encode(out)
-    }
-
-    fn length(&self) -> usize {
-        LeafNodeRef {
-            key: &self.key,
-            value: &self.value,
-        }
-        .length()
+impl LeafNode {
+    pub fn encode(&self, out: &mut dyn BufMut) {
+        encode_leaf(&self.key, &self.value, out)
     }
 }
 
@@ -283,30 +264,10 @@ impl From<AlloyExtensionNode> for ExtensionNode {
     }
 }
 
-impl Decodable for ExtensionNode {
-    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        let alloy_extension_node = AlloyExtensionNode::decode(buf)?;
-        Ok(alloy_extension_node.into())
-    }
-}
-
-impl Encodable for ExtensionNode {
-    fn encode(&self, out: &mut dyn BufMut) {
+impl ExtensionNode {
+    pub fn encode(&self, out: &mut dyn BufMut) {
         assert!(!self.child.rlp_pointer_dirty);
-        ExtensionNodeRef {
-            key: &self.key,
-            child: &self.child.rlp_pointer,
-        }
-        .encode(out)
-    }
-
-    fn length(&self) -> usize {
-        assert!(!self.child.rlp_pointer_dirty);
-        ExtensionNodeRef {
-            key: &self.key,
-            child: &self.child.rlp_pointer,
-        }
-        .length()
+        encode_extension(&self.key, &self.child.rlp_pointer, out);
     }
 }
 
@@ -330,53 +291,16 @@ impl From<AlloyBranchNode> for BranchNode {
     }
 }
 
-impl Decodable for BranchNode {
-    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        let alloy_node = AlloyBranchNode::decode(buf)?;
-        Ok(alloy_node.into())
-    }
-}
-
 impl BranchNode {
-    fn rlp_payload_length(&self) -> usize {
-        let mut payload_length = 1;
-
-        for index in 0..16 {
-            if let Some(child) = &self.children[index] {
+    pub fn encode(&self, out: &mut dyn BufMut) {
+        let mut input = [None; 16];
+        for i in 0..16 {
+            if let Some(child) = &self.children[i] {
                 assert!(!child.rlp_pointer_dirty);
-                payload_length += child.rlp_pointer.len();
-            } else {
-                payload_length += 1;
+                input[i] = Some(child.rlp_pointer.as_ref());
             }
         }
-        payload_length
-    }
-}
-
-impl Encodable for BranchNode {
-    fn encode(&self, out: &mut dyn BufMut) {
-        Header {
-            list: true,
-            payload_length: self.rlp_payload_length(),
-        }
-        .encode(out);
-
-        // Extend the RLP buffer with the present children
-        for index in 0..16 {
-            if let Some(child) = &self.children[index] {
-                assert!(!child.rlp_pointer_dirty);
-                out.put_slice(&child.rlp_pointer);
-            } else {
-                out.put_u8(EMPTY_STRING_CODE);
-            }
-        }
-
-        out.put_u8(EMPTY_STRING_CODE);
-    }
-
-    fn length(&self) -> usize {
-        let payload_length = self.rlp_payload_length();
-        payload_length + length_of_length(payload_length)
+        encode_branch_node(&input, out)
     }
 }
 
@@ -397,8 +321,8 @@ impl Decodable for SparseTrieNode {
     }
 }
 
-impl Encodable for SparseTrieNode {
-    fn encode(&self, out: &mut dyn BufMut) {
+impl SparseTrieNode {
+    pub fn encode(&self, out: &mut dyn BufMut) {
         match &self.kind {
             SparseTrieNodeKind::BranchNode(node) => {
                 node.encode(out);
@@ -414,13 +338,42 @@ impl Encodable for SparseTrieNode {
             }
         }
     }
+}
 
-    fn length(&self) -> usize {
-        match &self.kind {
-            SparseTrieNodeKind::BranchNode(node) => node.length(),
-            SparseTrieNodeKind::ExtensionNode(node) => node.length(),
-            SparseTrieNodeKind::LeafNode(node) => node.length(),
-            SparseTrieNodeKind::NullNode => 1,
+pub fn encode_leaf(key: &Nibbles, value: &[u8], out: &mut dyn BufMut) {
+    LeafNodeRef { key, value }.encode(out)
+}
+
+pub fn encode_extension(key: &Nibbles, child_rlp_pointer: &[u8], out: &mut dyn BufMut) {
+    ExtensionNodeRef {
+        key,
+        child: child_rlp_pointer,
+    }
+    .encode(out)
+}
+
+pub fn encode_branch_node(child_rlp_pointers: &[Option<&[u8]>; 16], out: &mut dyn BufMut) {
+    let mut payload_length = 1;
+    for i in 0..16 {
+        if let Some(child) = child_rlp_pointers[i] {
+            payload_length += child.len();
+        } else {
+            payload_length += 1;
         }
     }
+
+    Header {
+        list: true,
+        payload_length,
+    }
+    .encode(out);
+
+    for i in 0..16 {
+        if let Some(child) = child_rlp_pointers[i] {
+            out.put_slice(child);
+        } else {
+            out.put_u8(EMPTY_STRING_CODE);
+        }
+    }
+    out.put_u8(EMPTY_STRING_CODE);
 }
