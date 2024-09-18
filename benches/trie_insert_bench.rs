@@ -156,6 +156,30 @@ fn gather_nodes(c: &mut Criterion) {
     });
 }
 
+fn root_hash_all(c: &mut Criterion) {
+    let multiproof = get_test_mutliproofs();
+    let changes = get_change_set();
+
+    let shared_cache = RethSparseTrieSharedCache::default();
+    for p in multiproof {
+        shared_cache
+            .update_cache_with_fetched_nodes(p)
+            .expect("populate shared cache")
+    }
+
+    let tries = shared_cache
+        .gather_tries_for_changes(&changes)
+        .expect("gather must succed");
+
+    c.bench_function("root_hash_all", |b| {
+        b.iter_batched(
+            || (tries.clone(), changes.clone()),
+            |(mut tries, changes)| tries.calculate_root_hash(changes).expect("must hash"),
+            BatchSize::SmallInput,
+        );
+    });
+}
+
 fn root_hash_main_trie(c: &mut Criterion) {
     let multiproof = get_test_mutliproofs();
     let changes = get_change_set();
@@ -265,6 +289,7 @@ fn get_data_for_storage_trie(
 criterion_group!(
     benches,
     gather_nodes,
+    root_hash_all,
     root_hash_main_trie,
     root_hash_accounts
 );

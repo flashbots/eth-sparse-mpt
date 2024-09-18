@@ -15,7 +15,10 @@ mod fixed_trie_tests;
 
 use crate::sparse_mpt::{extract_prefix_and_suffix, strip_first_nibble_mut};
 
-use super::{encode_branch_node, encode_extension, encode_leaf};
+use super::{
+    encode_branch_node, encode_extension, encode_leaf, encode_len_branch_node,
+    encode_len_extension, encode_len_leaf,
+};
 
 pub use fixed_trie::*;
 
@@ -88,20 +91,26 @@ impl DiffTrieNode {
 
     pub fn rlp_encode(&self) -> Bytes {
         // @efficiency consider with_capacity
-        let mut out = Vec::new();
-        match &self.kind {
+        let out = match &self.kind {
             DiffTrieNodeKind::Leaf(leaf) => {
-                encode_leaf(leaf.key(), leaf.value(), &mut out);
+                let (key, value) = (leaf.key(), leaf.value());
+                let len = encode_len_leaf(key, value);
+                let mut out = Vec::with_capacity(len);
+                encode_leaf(key, value, &mut out);
+                out
             }
             DiffTrieNodeKind::Extension(ext) => {
-                encode_extension(
+                let (key, child_rlp) = (
                     ext.key(),
                     &ext.child
                         .rlp_pointer
                         .as_ref()
                         .expect("ext node rlp: child rlp must be computed"),
-                    &mut out,
                 );
+                let len = encode_len_extension(key, child_rlp);
+                let mut out = Vec::with_capacity(len);
+                encode_extension(key, child_rlp, &mut out);
+                out
             }
             DiffTrieNodeKind::Branch(branch) => {
                 let mut child_rlp_pointers: [Option<&[u8]>; 16] = [None; 16];
@@ -127,10 +136,13 @@ impl DiffTrieNode {
                             .expect("branch node rlp: child rlp must be computed"),
                     );
                 }
+                let len = encode_len_branch_node(&child_rlp_pointers);
+                let mut out = Vec::with_capacity(len);
                 encode_branch_node(&child_rlp_pointers, &mut out);
+                out
             }
             DiffTrieNodeKind::Null => {
-                out.push(EMPTY_STRING_CODE);
+                vec![EMPTY_STRING_CODE]
             }
         };
         Bytes::from(out)

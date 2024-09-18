@@ -1,6 +1,7 @@
 use crate::utils::HashMap;
 use alloy_primitives::keccak256;
 use alloy_primitives::Bytes;
+use alloy_rlp::length_of_length;
 use alloy_rlp::{BufMut, Decodable, Encodable, Header, EMPTY_STRING_CODE};
 use alloy_trie::nodes::word_rlp;
 use alloy_trie::nodes::{
@@ -344,12 +345,24 @@ pub fn encode_leaf(key: &Nibbles, value: &[u8], out: &mut dyn BufMut) {
     LeafNodeRef { key, value }.encode(out)
 }
 
+pub fn encode_len_leaf(key: &Nibbles, value: &[u8]) -> usize {
+    LeafNodeRef { key, value }.length()
+}
+
 pub fn encode_extension(key: &Nibbles, child_rlp_pointer: &[u8], out: &mut dyn BufMut) {
     ExtensionNodeRef {
         key,
         child: child_rlp_pointer,
     }
     .encode(out)
+}
+
+pub fn encode_len_extension(key: &Nibbles, child_rlp_pointer: &[u8]) -> usize {
+    ExtensionNodeRef {
+        key,
+        child: child_rlp_pointer,
+    }
+    .length()
 }
 
 pub fn encode_branch_node(child_rlp_pointers: &[Option<&[u8]>; 16], out: &mut dyn BufMut) {
@@ -376,4 +389,16 @@ pub fn encode_branch_node(child_rlp_pointers: &[Option<&[u8]>; 16], out: &mut dy
         }
     }
     out.put_u8(EMPTY_STRING_CODE);
+}
+
+pub fn encode_len_branch_node(child_rlp_pointers: &[Option<&[u8]>; 16]) -> usize {
+    let mut payload_length = 1;
+    for i in 0..16 {
+        if let Some(child) = child_rlp_pointers[i] {
+            payload_length += child.len();
+        } else {
+            payload_length += 1;
+        }
+    }
+    payload_length + length_of_length(payload_length)
 }
