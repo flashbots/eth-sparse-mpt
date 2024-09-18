@@ -46,13 +46,13 @@ impl DiffTrieNode {
     }
 
     pub fn new_branch(n1: u8, ptr1: DiffChildPtr, n2: u8, ptr2: DiffChildPtr) -> Self {
-        let mut changed_children = ArrayVec::new();
-        changed_children.push((n1, Some(ptr1)));
-        changed_children.push((n2, Some(ptr2)));
+        // let mut changed_children = ArrayVec::new();
+        // changed_children.push((n1, Some(ptr1)));
+        // changed_children.push((n2, Some(ptr2)));
         Self {
             kind: DiffTrieNodeKind::Branch(DiffBranchNode {
                 fixed: None,
-                changed_children,
+                changed_children: vec![(n1, Some(ptr1)), (n2, Some(ptr2))],
                 aux_bits: 0,
             }),
             rlp_pointer: None,
@@ -213,7 +213,8 @@ impl DiffChildPtr {
 pub struct DiffBranchNode {
     pub fixed: Option<Arc<FixedBranchNode>>,
     /// this must have an element for children that we have in the diff trie
-    pub changed_children: ArrayVec<(u8, Option<DiffChildPtr>), 16>,
+    // pub changed_children: ArrayVec<(u8, Option<DiffChildPtr>), 16>,
+    pub changed_children: Vec<(u8, Option<DiffChildPtr>)>,
     pub aux_bits: u16,
 }
 

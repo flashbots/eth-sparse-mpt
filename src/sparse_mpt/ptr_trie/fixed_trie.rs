@@ -29,7 +29,7 @@ pub enum FixedTrieNode {
     },
     Branch {
         node: Arc<FixedBranchNode>,
-        child_ptrs: ArrayVec<(u8, u64), 16>,
+        child_ptrs: Vec<(u8, u64)>,
     },
     Null,
 }
@@ -56,7 +56,8 @@ impl FixedTrieNode {
                 DiffTrieNodeKind::Branch(DiffBranchNode {
                     fixed: Some(Arc::clone(node)),
                     // changed_children: Vec::with_capacity(aux_bits.count_ones() as usize),
-                    changed_children: ArrayVec::new(),
+                    // changed_children: ArrayVec::new(),
+		    changed_children: Vec::new(),
                     aux_bits: node.child_mask,
                 })
             }
@@ -164,7 +165,7 @@ impl FixedTrie {
                 DiffTrieNodeKind::Branch(branch) => {
                     const ARRAY_REPEAT_VALUE: Option<Bytes> = None;
                     let mut children = Box::new([ARRAY_REPEAT_VALUE; 16]);
-                    let mut child_ptrs = ArrayVec::new();
+                    let mut child_ptrs = Vec::new();
                     let mut child_mask = 0u16;
                     for n in 0..16u8 {
                         if branch.has_child(n) {
@@ -214,7 +215,7 @@ impl FixedTrie {
             let fixed_trie_node = match alloy_trie_node {
                 AlloyTrieNode::Branch(node) => FixedTrieNode::Branch {
                     node: Arc::new(node.into()),
-                    child_ptrs: ArrayVec::new(),
+                    child_ptrs: Vec::new(),
                 },
                 AlloyTrieNode::Extension(node) => FixedTrieNode::Extension {
                     node: Arc::new(node.into()),
