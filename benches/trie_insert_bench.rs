@@ -1,12 +1,14 @@
 use std::fs::read_to_string;
 
-use ahash::HashMap;
+use alloy_primitives::hex_literal::hex;
+use alloy_primitives::Bytes;
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
 use eth_sparse_mpt::reth_sparse_trie::change_set::ETHTrieChangeSet;
 use eth_sparse_mpt::reth_sparse_trie::hash::EthSparseTries;
+use eth_sparse_mpt::reth_sparse_trie::shared_cache::RethSparseTrieShareCacheInternal;
 use eth_sparse_mpt::reth_sparse_trie::trie_fetcher::MultiProof;
 use eth_sparse_mpt::reth_sparse_trie::RethSparseTrieSharedCache;
-use eth_sparse_mpt::sparse_mpt::SparseTrieNodes;
+use eth_sparse_mpt::sparse_mpt::ptr_trie::{DiffTrie, FixedTrie};
 
 fn get_test_mutliproofs() -> Vec<MultiProof> {
     let files = [
@@ -26,7 +28,7 @@ fn get_change_set() -> ETHTrieChangeSet {
     serde_json::from_str(&data).expect("parsing changeset")
 }
 
-fn get_storage_tries(changes: &ETHTrieChangeSet, tries: &EthSparseTries) -> Vec<SparseTrieNodes> {
+fn get_storage_tries(changes: &ETHTrieChangeSet, tries: &EthSparseTries) -> Vec<DiffTrie> {
     let mut storage_tries = Vec::new();
     for (_, account) in changes.account_trie_updates.iter().enumerate() {
         storage_tries.push(
@@ -41,7 +43,7 @@ fn get_storage_tries(changes: &ETHTrieChangeSet, tries: &EthSparseTries) -> Vec<
 }
 
 fn apply_storage_tries_changes<'a>(
-    storage_tries: impl Iterator<Item = &'a mut SparseTrieNodes>,
+    storage_tries: impl Iterator<Item = &'a mut DiffTrie>,
     changes: &ETHTrieChangeSet,
 ) {
     for (i, trie) in storage_tries.enumerate() {
@@ -70,11 +72,7 @@ fn gather_nodes(c: &mut Criterion) {
     }
 
     let tries = shared_cache.gather_tries_for_changes(&changes).unwrap();
-    println!(
-        "acc trie len: {}, count: {:?}",
-        tries.account_trie.len(),
-        tries.account_trie.count_nodes()
-    );
+    println!("acc trie len: {}", tries.account_trie.len(),);
 
     c.bench_function("gather_nodes_clone_acc_trie", |b| {
         b.iter(|| {
@@ -83,11 +81,76 @@ fn gather_nodes(c: &mut Criterion) {
         })
     });
 
-    c.bench_function("gather_nodes", |b| {
+    c.bench_function("gather_nodes_shared_cache", |b| {
         b.iter(|| {
             let out = shared_cache
                 .gather_tries_for_changes(&changes)
                 .expect("gather must succed");
+            black_box(out);
+        })
+    });
+
+    let internal_cache = shared_cache.clone_inner();
+    let account: Bytes =
+        hex!("61845bd4bf1d79174d0ba40156aea4c8aaded050ca7c00ce13d43878cd13a79d").into();
+    let mut storage_trie_data = get_data_for_storage_trie(&internal_cache, &changes, &account);
+    c.bench_function("gather_nodes_empty_account", |b| {
+        b.iter(|| {
+            let StorageTrieData {
+                fixed_trie,
+                updated_keys,
+                deletes,
+                ..
+            } = &mut storage_trie_data;
+            let out = fixed_trie
+                .gather_subtrie(&updated_keys, &deletes)
+                .expect("must gather");
+            // dbg!(updated_keys, deletes, &out);
+            // panic!();
+            black_box(out);
+        })
+    });
+
+    let account: Bytes =
+        hex!("ab14d68802a763f7db875346d03fbf86f137de55814b191c069e721f47474733").into();
+    let mut storage_trie_data = get_data_for_storage_trie(&internal_cache, &changes, &account);
+    c.bench_function("gather_nodes_big_changes_account", |b| {
+        b.iter(|| {
+            let StorageTrieData {
+                fixed_trie,
+                updated_keys,
+                deletes,
+                ..
+            } = &mut storage_trie_data;
+            let out = fixed_trie
+                .gather_subtrie(&updated_keys, &deletes)
+                .expect("must gather");
+            // dbg!(updated_keys, deletes, &out);
+            // panic!();
+            black_box(out);
+        })
+    });
+
+    let account_proof = {
+        let multiproof = get_test_mutliproofs();
+        let mut account_proof: Vec<_> = multiproof
+            .into_iter()
+            .map(|mp| mp.account_subtree.into_iter().collect::<Vec<_>>())
+            .flatten()
+            .collect();
+        account_proof.sort_by_key(|(p, _)| p.clone());
+        account_proof.dedup_by_key(|(p, _)| p.clone());
+        account_proof
+    };
+
+    let mut fixed_trie = FixedTrie::default();
+    fixed_trie.add_nodes(&account_proof).expect("must add");
+
+    c.bench_function("gather_nodes_account_trie", |b| {
+        b.iter(|| {
+            let out = fixed_trie
+                .gather_subtrie(&changes.account_trie_updates, &changes.account_trie_deletes)
+                .expect("must gather");
             black_box(out);
         })
     });
@@ -119,18 +182,6 @@ fn root_hash_main_trie(c: &mut Criterion) {
         b.iter_batched(
             || trie.clone(),
             |mut trie| trie.root_hash().expect("must hash"),
-            BatchSize::SmallInput,
-        );
-    });
-
-    let mut root_hash_cache = HashMap::default();
-    c.bench_function("root_hash_main_trie_with_cache", |b| {
-        b.iter_batched(
-            || trie.clone(),
-            |mut trie| {
-                trie.root_hash_no_recursion(Some(&mut root_hash_cache))
-                    .expect("must hash")
-            },
             BatchSize::SmallInput,
         );
     });
@@ -167,28 +218,48 @@ fn root_hash_accounts(c: &mut Criterion) {
             |mut storage_tries| {
                 apply_storage_tries_changes(storage_tries.iter_mut(), &changes);
                 for trie in storage_tries.iter_mut() {
-                    trie.root_hash_no_recursion(None)
-                        .expect("must hash storage trie");
+                    trie.root_hash().expect("must hash storage trie");
                 }
             },
             BatchSize::SmallInput,
         );
     });
+}
 
-    let mut root_hash_cache = HashMap::default();
-    c.bench_function("root_hash_accounts_hash_no_recursion_with_cache", |b| {
-        b.iter_batched(
-            || get_storage_tries(&changes, &tries),
-            |mut storage_tries| {
-                apply_storage_tries_changes(storage_tries.iter_mut(), &changes);
-                for trie in storage_tries.iter_mut() {
-                    trie.root_hash_no_recursion(Some(&mut root_hash_cache))
-                        .expect("must hash storage trie");
-                }
-            },
-            BatchSize::SmallInput,
-        );
-    });
+#[derive(Debug)]
+struct StorageTrieData {
+    fixed_trie: FixedTrie,
+    updated_keys: Vec<Bytes>,
+    // updated_values: Vec<Bytes>,
+    deletes: Vec<Bytes>,
+}
+
+fn get_data_for_storage_trie(
+    cache: &RethSparseTrieShareCacheInternal,
+    change_set: &ETHTrieChangeSet,
+    account: &Bytes,
+) -> StorageTrieData {
+    let acc_idx = change_set
+        .account_trie_updates
+        .iter()
+        .position(|el| el == account)
+        .expect("account not found");
+
+    let updated_keys = change_set.storage_trie_updated_keys[acc_idx].clone();
+    // let updated_values = change_set.storage_trie_updated_values[acc_idx].clone();
+    let deletes = change_set.storage_trie_deleted_keys[acc_idx].clone();
+    let fixed_trie = cache
+        .storage_tries
+        .get(account)
+        .cloned()
+        .unwrap_or_default();
+
+    StorageTrieData {
+        fixed_trie,
+        updated_keys,
+        // updated_values,
+        deletes,
+    }
 }
 
 criterion_group!(

@@ -1,7 +1,7 @@
 use super::*;
 use crate::reth_sparse_trie::shared_cache::MissingNodes;
 use crate::sparse_mpt::SparseTrieNodes;
-use ahash::HashMap;
+use crate::utils::HashMap;
 use alloy_primitives::{hex, keccak256, Bytes, B256, U256};
 use alloy_rlp::Encodable;
 use alloy_trie::{Nibbles, EMPTY_ROOT_HASH};

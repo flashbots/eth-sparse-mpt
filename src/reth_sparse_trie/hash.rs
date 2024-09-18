@@ -1,6 +1,6 @@
 use super::change_set::ETHTrieChangeSet;
-use crate::sparse_mpt::SparseTrieNodes;
-use ahash::HashMap;
+use crate::sparse_mpt::ptr_trie::DiffTrie;
+use crate::utils::HashMap;
 use alloy_primitives::{Bytes, B256};
 use alloy_rlp::Encodable;
 use eyre::WrapErr;
@@ -8,8 +8,8 @@ use reth_trie::TrieAccount;
 
 #[derive(Default, Clone)]
 pub struct EthSparseTries {
-    pub account_trie: SparseTrieNodes,
-    pub storage_tries: HashMap<Bytes, SparseTrieNodes>,
+    pub account_trie: DiffTrie,
+    pub storage_tries: HashMap<Bytes, DiffTrie>,
 }
 
 impl EthSparseTries {
@@ -19,6 +19,7 @@ impl EthSparseTries {
         let mut account_hashes = HashMap::default();
 
         for (idx, account) in changes.account_trie_updates.iter().enumerate() {
+            // let start = std::time::Instant::now();
             // let test_account = Bytes::from(hex!("07dbc2fd98c6f6265f2b5c8ebddf898b06ff1b3d74b54abf9c68ec2cb61f46f1"));
             // let print = account == &test_account;
 
@@ -56,6 +57,8 @@ impl EthSparseTries {
                 .root_hash()
                 .with_context(|| format!("Calculating root hash: {:?}", account))?;
             account_hashes.insert(account.clone(), storage_hash);
+
+            // println!("updates: {}, deletes: {}, duration_mus: {}", updated_slots.len(), deleted_slots.len(), start.elapsed().as_micros());
         }
 
         let mut encoded_account = Vec::new();

@@ -1,10 +1,10 @@
-use ahash::HashMap;
 use std::sync::{Arc, Mutex};
 
 use super::change_set::ETHTrieChangeSet;
 use super::hash::EthSparseTries;
 use super::trie_fetcher::MultiProof;
-use crate::sparse_mpt::{SparseTrieError, SparseTrieNodes};
+use crate::sparse_mpt::{ptr_trie::FixedTrie, SparseTrieError};
+use crate::utils::HashMap;
 use alloy_primitives::Bytes;
 use alloy_trie::Nibbles;
 
@@ -52,12 +52,16 @@ impl RethSparseTrieSharedCache {
         let mut internal = self.internal.lock().unwrap();
         internal.update_cache_with_fetched_nodes(multiproof)
     }
+
+    pub fn clone_inner(&self) -> RethSparseTrieShareCacheInternal {
+        self.internal.lock().unwrap().clone()
+    }
 }
 
 #[derive(Debug, Clone, Default)]
-struct RethSparseTrieShareCacheInternal {
-    account_trie: SparseTrieNodes,
-    storage_tries: HashMap<Bytes, SparseTrieNodes>,
+pub struct RethSparseTrieShareCacheInternal {
+    pub account_trie: FixedTrie,
+    pub storage_tries: HashMap<Bytes, FixedTrie>,
 }
 
 impl RethSparseTrieShareCacheInternal {
@@ -76,23 +80,25 @@ impl RethSparseTrieShareCacheInternal {
                 tries.account_trie = account_trie;
             }
             Err(missing_acccount_trie_nodes) => {
-                missing_nodes.account_trie_nodes = missing_acccount_trie_nodes.nodes;
+                missing_nodes.account_trie_nodes = missing_acccount_trie_nodes;
             }
         }
 
         for acc_idx in 0..change_set.account_trie_updates.len() {
+            // let start = std::time::Instant::now();
             let account = change_set.account_trie_updates[acc_idx].clone();
             let updates = &change_set.storage_trie_updated_keys[acc_idx];
             let deletes = &change_set.storage_trie_deleted_keys[acc_idx];
             let storage_trie = self.storage_tries.entry(account.clone()).or_default();
             match storage_trie.gather_subtrie(&updates, &deletes) {
                 Ok(storage_trie) => {
+                    // println!("{:?} changes {}, deletes {} elapsed_ns {}", account, updates.len(), deletes.len(), start.elapsed().as_nanos());
                     tries.storage_tries.insert(account, storage_trie);
                 }
                 Err(missing_storage_trie_nodes) => {
                     missing_nodes
                         .storage_trie_nodes
-                        .insert(account, missing_storage_trie_nodes.nodes);
+                        .insert(account, missing_storage_trie_nodes);
                 }
             }
         }
@@ -108,12 +114,15 @@ impl RethSparseTrieShareCacheInternal {
         &mut self,
         multiproof: MultiProof,
     ) -> Result<(), SparseTrieError> {
-        self.account_trie
-            .add_nodes(multiproof.account_subtree.into_iter())?;
+        let mut nodes: Vec<_> = multiproof.account_subtree.into_iter().collect();
+        nodes.sort_by_key(|(p, _)| p.clone());
+        self.account_trie.add_nodes(&nodes)?;
         for (account, storge_proofs) in multiproof.storages {
+            let mut nodes: Vec<_> = storge_proofs.subtree.into_iter().collect();
+            nodes.sort_by_key(|(p, _)| p.clone());
             let account = Bytes::copy_from_slice(account.as_slice());
             let storage_trie = self.storage_tries.entry(account).or_default();
-            storage_trie.add_nodes(storge_proofs.subtree.into_iter())?;
+            storage_trie.add_nodes(&nodes)?;
         }
         Ok(())
     }

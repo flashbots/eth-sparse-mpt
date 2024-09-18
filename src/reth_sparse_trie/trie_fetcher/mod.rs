@@ -1,7 +1,8 @@
 #[cfg(test)]
 mod toy_trie_tests;
 
-use ahash::{HashMap, HashMapExt, HashSet};
+use crate::utils::HashSet;
+use crate::utils::{hash_map_with_capacity, HashMap};
 use alloy_primitives::{Bytes, B256};
 use alloy_trie::Nibbles;
 use reth_db_api::database::Database;
@@ -38,11 +39,11 @@ impl MultiProof {
 
 impl From<RethMultiProof> for MultiProof {
     fn from(reth_proof: RethMultiProof) -> Self {
-        let mut account_subtree = HashMap::with_capacity(reth_proof.account_subtree.len());
+        let mut account_subtree = hash_map_with_capacity(reth_proof.account_subtree.len());
         for (k, v) in reth_proof.account_subtree {
             account_subtree.insert(k, v);
         }
-        let mut storages = HashMap::with_capacity(reth_proof.storages.len());
+        let mut storages = hash_map_with_capacity(reth_proof.storages.len());
         for (k, v) in reth_proof.storages {
             storages.insert(k, v.into());
         }
@@ -62,7 +63,7 @@ pub struct StorageMultiProof {
 
 impl From<RethStorageMultiProof> for StorageMultiProof {
     fn from(reth_proof: RethStorageMultiProof) -> Self {
-        let mut subtree = HashMap::with_capacity(reth_proof.subtree.len());
+        let mut subtree = hash_map_with_capacity(reth_proof.subtree.len());
         for (k, v) in reth_proof.subtree {
             subtree.insert(k, v);
         }

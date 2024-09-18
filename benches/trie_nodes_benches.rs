@@ -1,7 +1,7 @@
 use alloy_primitives::{keccak256, Bytes, B256, U256};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use eth_sparse_mpt::sparse_mpt::SparseTrieNodes;
-use eth_sparse_mpt::utils::KeccakHasher;
+use eth_sparse_mpt::utils::{HashMap, KeccakHasher};
 
 // hashing this trie it roughly equivalent to updating the trie for the block
 const TRIE_SIZE: usize = 3000;
@@ -65,7 +65,7 @@ fn hashing(c: &mut Criterion) {
         data.push(B256::random());
     }
 
-    let mut hash_cache = ahash::HashMap::default();
+    let mut hash_cache = HashMap::default();
 
     c.bench_function(&format!("hashing_{}_elements", TRIE_SIZE), |b| {
         b.iter(|| {

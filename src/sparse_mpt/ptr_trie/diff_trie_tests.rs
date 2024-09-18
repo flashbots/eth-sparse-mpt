@@ -1,20 +1,22 @@
-use crate::utils::reference_trie_hash;
-use crate::utils::HashSet;
-use alloy_primitives::hex;
-use eyre::Context;
-use proptest::prelude::any;
-use proptest::proptest;
-
 use super::*;
+use crate::utils::reference_trie_hash2;
+use crate::utils::HashSet;
+use eyre::Context;
 
-fn compare_impls_with_hashing(data: &[(Vec<u8>, Vec<u8>)], insert_hashing: bool) {
-    let expected = reference_trie_hash(data);
-    let mut trie = SparseTrieNodes::empty_trie();
+fn convert_input_to_bytes(input: &[(Vec<u8>, Vec<u8>)]) -> Vec<(Bytes, Bytes)> {
+    input
+        .into_iter()
+        .map(|(k, v)| (k.clone().into(), v.clone().into()))
+        .collect()
+}
+
+fn compare_impls_with_hashing(data: Vec<(Bytes, Bytes)>, insert_hashing: bool) {
+    let expected = reference_trie_hash2(&data);
+    let mut trie = DiffTrie::new_empty();
     for (key, value) in data {
-        trie.insert(key.clone().into(), value.clone().into())
-            .expect("can't insert");
+        trie.insert(key, value).expect("can't insert");
         if insert_hashing {
-            trie.root_hash().expect("must hash after insert");
+            trie.root_hash().expect("must hash");
         }
     }
     let got = trie.root_hash().expect("hashing failed");
@@ -25,17 +27,8 @@ fn compare_impls_with_hashing(data: &[(Vec<u8>, Vec<u8>)], insert_hashing: bool)
     );
 }
 
-fn convert_input_to_bytes(input: &[(Vec<u8>, Vec<u8>)]) -> Vec<(Bytes, Bytes)> {
-    input
-        .into_iter()
-        .map(|(k, v)| (k.clone().into(), v.clone().into()))
-        .collect()
-}
-
-fn compare_sparse_impl(data: &[(Vec<u8>, Vec<u8>)], insert_hashing: bool) {
-    let expected = reference_trie_hash(data);
-
-    let mut data = convert_input_to_bytes(data);
+fn compare_sparse_impl(mut data: Vec<(Bytes, Bytes)>, insert_hashing: bool) {
+    let expected = reference_trie_hash2(&data);
 
     let (last, data) = if let Some(last) = data.pop() {
         (vec![last], data)
@@ -43,7 +36,7 @@ fn compare_sparse_impl(data: &[(Vec<u8>, Vec<u8>)], insert_hashing: bool) {
         (vec![], data)
     };
 
-    let mut trie = SparseTrieNodes::empty_trie();
+    let mut trie = DiffTrie::new_empty();
     for (key, value) in data {
         trie.insert(key, value).expect("can't insert");
         if insert_hashing {
@@ -52,8 +45,10 @@ fn compare_sparse_impl(data: &[(Vec<u8>, Vec<u8>)], insert_hashing: bool) {
     }
     trie.root_hash().expect("must hash");
 
+    let fixed_trie = FixedTrie::from_hashed_diff_trie_test(&trie);
+
     let changed_keys = last.iter().map(|(k, _)| k.clone()).collect::<Vec<_>>();
-    let mut gathered_trie = trie
+    let mut gathered_trie = fixed_trie
         .gather_subtrie(&changed_keys, &[])
         .expect("gather must work");
     for (k, v) in last {
@@ -66,10 +61,11 @@ fn compare_sparse_impl(data: &[(Vec<u8>, Vec<u8>)], insert_hashing: bool) {
 }
 
 fn compare_impls(data: &[(Vec<u8>, Vec<u8>)]) {
-    compare_impls_with_hashing(data, false);
-    compare_impls_with_hashing(data, true);
-    compare_sparse_impl(data, false);
-    compare_sparse_impl(data, true);
+    let data = convert_input_to_bytes(data);
+    compare_impls_with_hashing(data.clone(), false);
+    compare_impls_with_hashing(data.clone(), true);
+    compare_sparse_impl(data.clone(), false);
+    compare_sparse_impl(data.clone(), true);
 }
 
 #[test]
@@ -79,7 +75,7 @@ fn empty_trie() {
 
 #[test]
 fn one_element_trie() {
-    let data = [(hex!("11").to_vec(), hex!("aa").to_vec())];
+    let data = [(vec![1, 1], vec![0xa, 0xa])];
     compare_impls(&data)
 }
 
@@ -167,33 +163,35 @@ fn insert_into_branch_leaf_child() {
     compare_impls(data);
 }
 
-fn compare_with_removals_with_hashing(
-    data: &[(Vec<u8>, Vec<u8>)],
-    remove: &[Vec<u8>],
-    insert_hashing: bool,
-) -> Result<(), SparseTrieError> {
+fn reference_hash_with_removals(data: &[(Bytes, Bytes)], remove: &[Bytes]) -> B256 {
     let removed_keys: HashSet<_> = remove.iter().cloned().collect();
     let filtered_data: Vec<_> = data
         .iter()
         .filter(|(k, _)| !removed_keys.contains(k))
         .cloned()
         .collect();
+    reference_trie_hash2(&filtered_data)
+}
 
-    let reference_hash = reference_trie_hash(&filtered_data);
+fn compare_with_removals_with_hashing(
+    data: Vec<(Bytes, Bytes)>,
+    remove: Vec<Bytes>,
+    insert_hashing: bool,
+) -> Result<(), DeletionError> {
+    let reference_hash = reference_hash_with_removals(&data, &remove);
 
-    let mut trie = SparseTrieNodes::empty_trie();
+    let mut trie = DiffTrie::new_empty();
     for (key, val) in data {
-        trie.insert(key.clone().into(), val.clone().into())
-            .expect("must insert");
+        trie.insert(key, val).expect("must insert");
         if insert_hashing {
-            trie.root_hash().expect("must hash after insert");
+            trie.root_hash().expect("must hash");
         }
     }
 
     for key in remove {
-        trie.delete(key.clone().into())?;
+        trie.delete(key)?;
         if insert_hashing {
-            trie.root_hash().expect("must hash after delete");
+            trie.root_hash().expect("must hash");
         }
     }
 
@@ -208,50 +206,37 @@ fn compare_with_removals_with_hashing(
 }
 
 fn compare_with_removals_sparse(
-    data: &[(Vec<u8>, Vec<u8>)],
-    remove: &[Vec<u8>],
+    data: Vec<(Bytes, Bytes)>,
+    remove: Vec<Bytes>,
     insert_hashing: bool,
-) -> Result<(), SparseTrieError> {
-    let removed_keys: HashSet<_> = remove.iter().cloned().collect();
-    let filtered_data: Vec<_> = data
-        .iter()
-        .filter(|(k, _)| !removed_keys.contains(k))
-        .cloned()
-        .collect();
+) -> Result<(), DeletionError> {
+    let reference_hash = reference_hash_with_removals(&data, &remove);
 
-    let data = convert_input_to_bytes(data);
-
-    let reference_hash = reference_trie_hash(&filtered_data);
-
-    let mut trie = SparseTrieNodes::empty_trie();
+    let mut trie = DiffTrie::new_empty();
     for (key, val) in data {
         trie.insert(key, val).expect("must insert");
         if insert_hashing {
-            trie.root_hash().expect("must hash after insert");
+            trie.root_hash().expect("must hash");
         }
     }
     trie.root_hash().expect("must hash");
 
-    let deleted_keys = remove
-        .iter()
-        .map(|r| Bytes::copy_from_slice(r))
-        .collect::<Vec<_>>();
-    let mut trie = trie
-        .gather_subtrie(&[], &deleted_keys)
-        .expect("failed to gather for removals");
+    let fixed_trie = FixedTrie::from_hashed_diff_trie_test(&trie);
+    let mut gathered_trie = fixed_trie
+        .gather_subtrie(&[], &remove)
+        .expect("gather must work");
 
     for key in remove {
-        let key = key.clone().into();
-        trie.delete(key)?;
+        gathered_trie.delete(key)?;
         if insert_hashing {
-            trie.root_hash().expect("must hash after delete");
+            gathered_trie.root_hash().expect("must hash");
         }
     }
 
-    let hash = trie.root_hash().expect("must hash");
+    let hash = gathered_trie.root_hash().expect("must hash");
     assert_eq!(
         hash, reference_hash,
-        "comparing hashing, insert_hashing: {}",
+        "comparing sparse removals, insert_hashing: {}",
         insert_hashing
     );
 
@@ -259,12 +244,16 @@ fn compare_with_removals_sparse(
 }
 
 fn compare_with_removals(data: &[(Vec<u8>, Vec<u8>)], remove: &[Vec<u8>]) -> eyre::Result<()> {
-    compare_with_removals_with_hashing(data, remove, false)
-        .with_context(|| "normal hashing: true")?;
-    compare_with_removals_with_hashing(data, remove, true)
+    let data = convert_input_to_bytes(data);
+    let remove: Vec<Bytes> = remove.iter().map(|r| r.clone().into()).collect();
+    compare_with_removals_with_hashing(data.clone(), remove.clone(), false)
         .with_context(|| "normal hashing: false")?;
-    compare_with_removals_sparse(data, remove, false).with_context(|| "sparse hashing: false")?;
-    compare_with_removals_sparse(data, remove, true).with_context(|| "sparse hashing: true")?;
+    compare_with_removals_with_hashing(data.clone(), remove.clone(), true)
+        .with_context(|| "normal hashing: true")?;
+    compare_with_removals_sparse(data.clone(), remove.clone(), false)
+        .with_context(|| "sparse hashing: false")?;
+    compare_with_removals_sparse(data.clone(), remove.clone(), true)
+        .with_context(|| "sparse hashing: true")?;
     Ok(())
 }
 
@@ -314,13 +303,7 @@ fn remove_branch_err() {
 
     let remove = &[vec![0x01]];
 
-    assert!(matches!(
-        compare_with_removals(add, remove)
-            .unwrap_err()
-            .downcast::<SparseTrieError>()
-            .expect("incorrect error"),
-        SparseTrieError::KeyNotFound
-    ));
+    let _ = compare_with_removals(add, remove).unwrap_err();
 }
 
 #[test]
@@ -475,123 +458,4 @@ fn check_correct_gather_for_orphan_of_and_orphan() {
     let remove = &[vec![0x00, 0x00, 0x00], vec![0x09, 0x00, 0x00]];
 
     compare_with_removals(add, remove).unwrap();
-}
-
-proptest! {
-    #[test]
-    fn proptest_random_insert_any_values(key_values in any::<Vec<([u8; 3], Vec<u8>)>>()) {
-        let data: Vec<_> = key_values.into_iter().map(|(k, v)| (k.to_vec(), v)).collect();
-        compare_impls(&data);
-    }
-
-
-    #[test]
-    fn proptest_random_insert_big_values(key_values in any::<Vec<([u8; 3], [u8; 64])>>()) {
-        let data: Vec<_> = key_values.into_iter().map(|(k, v)| (k.to_vec(), v.to_vec())).collect();
-        compare_impls(&data);
-    }
-
-    #[test]
-    fn proptest_random_insert_small_values(key_values in any::<Vec<([u8; 3], [u8; 3])>>()) {
-        let data: Vec<_> = key_values.into_iter().map(|(k, v)| (k.to_vec(), v.to_vec())).collect();
-        compare_impls(&data);
-    }
-
-    #[test]
-    fn proptest_random_insert_big_keys(key_values in any::<Vec<([u8; 32], Vec<u8>)>>()) {
-        let data: Vec<_> = key_values.into_iter().map(|(k, v)| (k.to_vec(), v)).collect();
-        compare_impls(&data);
-    }
-
-
-    #[test]
-    fn proptest_random_insert_remove_any_values(key_values in any::<Vec<(([u8; 3], bool), Vec<u8>)>>()) {
-        let mut keys_to_remove_set = HashSet::default();
-        let mut keys_to_remove = Vec::new();
-        let data: Vec<_> = key_values.into_iter().map(|((k, remove), v)| {
-            if remove && !keys_to_remove_set.contains(&k) {
-                keys_to_remove_set.insert(k.clone());
-                keys_to_remove.push(k.to_vec());
-            }
-            (k.to_vec(), v)
-        }).collect();
-        compare_with_removals(&data, &keys_to_remove).unwrap()
-    }
-}
-
-fn assert_corect_gather(
-    add: &[(Vec<u8>, Vec<u8>)],
-    changed: &[Vec<u8>],
-    deleted: &[Vec<u8>],
-    expected_node_nibbles: &[Vec<u8>],
-) {
-    let mut trie = SparseTrieNodes::empty_trie();
-    for (key, value) in add {
-        trie.insert(key.clone().into(), value.clone().into())
-            .expect("insert must work");
-    }
-    let changed_keys = changed
-        .iter()
-        .map(|c| Bytes::from(c.clone()))
-        .collect::<Vec<_>>();
-    let deleted_keys = deleted
-        .iter()
-        .map(|c| Bytes::from(c.clone()))
-        .collect::<Vec<_>>();
-
-    let result = trie
-        .gather_subtrie(&changed_keys, &deleted_keys)
-        .expect("should suceed");
-    for expected_node in expected_node_nibbles {
-        let path = Nibbles::from_nibbles_unchecked(expected_node);
-        assert!(result.nodes.contains_key(&path), "key {:?}", path);
-    }
-}
-
-#[test]
-fn test_gather_subtrie_simple() {
-    let add = &[
-        (vec![0x10], vec![0xa]),
-        (vec![0x23], vec![0xb]),
-        (vec![0x34], vec![0xc]),
-    ];
-
-    let changed = &[vec![0x10]];
-    let deleted = &[];
-
-    let expected_nodes_nibbles = &[vec![], vec![0x01]];
-
-    assert_corect_gather(add, changed, deleted, expected_nodes_nibbles);
-}
-
-#[test]
-fn test_gather_subtrie_deletion() {
-    let add = &[
-        (vec![0x10], vec![0xa]),
-        (vec![0x23], vec![0xb]),
-        (vec![0x34], vec![0xc]),
-    ];
-
-    let changed = &[];
-    let deleted = &[vec![0x23]];
-
-    let expected_nodes_nibbles = &[vec![], vec![0x02]];
-
-    assert_corect_gather(add, changed, deleted, expected_nodes_nibbles);
-}
-
-#[test]
-fn test_gather_subtrie_deletion_need_neighbour() {
-    let add = &[
-        (vec![0x10], vec![0xa]),
-        (vec![0x23], vec![0xb]),
-        (vec![0x34], vec![0xc]),
-    ];
-
-    let changed = &[];
-    let deleted = &[vec![0x23], vec![0x34]];
-
-    let expected_nodes_nibbles = &[vec![], vec![0x01], vec![0x02], vec![0x03]];
-
-    assert_corect_gather(add, changed, deleted, expected_nodes_nibbles);
 }

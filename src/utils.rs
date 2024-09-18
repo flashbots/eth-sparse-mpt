@@ -1,4 +1,19 @@
-use alloy_primitives::{keccak256, B256};
+use alloy_primitives::{keccak256, Bytes, B256};
+use rustc_hash::FxBuildHasher;
+
+// pub type HashMap<K, V> = std::collections::HashMap::<K, V, ahash::RandomState>;
+// pub type HashSet<K> = std::collections::HashSet::<K, ahash::RandomState>;
+
+// pub fn hash_map_with_capacity<K, V>(capacity: usize) -> HashMap<K, V> {
+//     HashMap::with_capacity_and_hasher(capacity, ahash::RandomState::default())
+// }
+
+pub type HashMap<K, V> = std::collections::HashMap<K, V, FxBuildHasher>;
+pub type HashSet<K> = std::collections::HashSet<K, FxBuildHasher>;
+
+pub fn hash_map_with_capacity<K, V>(capacity: usize) -> HashMap<K, V> {
+    HashMap::with_capacity_and_hasher(capacity, FxBuildHasher)
+}
 
 #[derive(Debug)]
 pub struct KeccakHasher {}
@@ -14,5 +29,9 @@ impl hash_db::Hasher for KeccakHasher {
 }
 
 pub fn reference_trie_hash(data: &[(Vec<u8>, Vec<u8>)]) -> B256 {
+    triehash::trie_root::<KeccakHasher, _, _, _>(data.to_vec())
+}
+
+pub fn reference_trie_hash2(data: &[(Bytes, Bytes)]) -> B256 {
     triehash::trie_root::<KeccakHasher, _, _, _>(data.to_vec())
 }
