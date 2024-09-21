@@ -7,7 +7,6 @@ use alloy_trie::nodes::{
     BranchNode as AlloyBranchNode, ExtensionNode as AlloyExtensionNode, LeafNode as AlloyLeafNode,
     TrieNode as AlloyTrieNode,
 };
-use arrayvec::ArrayVec;
 use reth_trie::Nibbles;
 use std::sync::Arc;
 

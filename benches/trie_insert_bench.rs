@@ -171,10 +171,49 @@ fn root_hash_all(c: &mut Criterion) {
         .gather_tries_for_changes(&changes)
         .expect("gather must succed");
 
-    c.bench_function("root_hash_all", |b| {
+    c.bench_function("root_hash_all_par_all", |b| {
         b.iter_batched(
             || (tries.clone(), changes.clone()),
-            |(mut tries, changes)| tries.calculate_root_hash(changes).expect("must hash"),
+            |(mut tries, changes)| {
+                tries
+                    .calculate_root_hash(changes, true, true)
+                    .expect("must hash")
+            },
+            BatchSize::SmallInput,
+        );
+    });
+    c.bench_function("root_hash_all_no_par", |b| {
+        b.iter_batched(
+            || (tries.clone(), changes.clone()),
+            |(mut tries, changes)| {
+                tries
+                    .calculate_root_hash(changes, false, false)
+                    .expect("must hash")
+            },
+            BatchSize::SmallInput,
+        );
+    });
+
+    c.bench_function("root_hash_all_par_storage", |b| {
+        b.iter_batched(
+            || (tries.clone(), changes.clone()),
+            |(mut tries, changes)| {
+                tries
+                    .calculate_root_hash(changes, true, false)
+                    .expect("must hash")
+            },
+            BatchSize::SmallInput,
+        );
+    });
+
+    c.bench_function("root_hash_all_par_accounts", |b| {
+        b.iter_batched(
+            || (tries.clone(), changes.clone()),
+            |(mut tries, changes)| {
+                tries
+                    .calculate_root_hash(changes, false, true)
+                    .expect("must hash")
+            },
             BatchSize::SmallInput,
         );
     });
@@ -202,16 +241,24 @@ fn root_hash_main_trie(c: &mut Criterion) {
         trie.delete(key).expect("must update");
     }
 
-    c.bench_function("root_hash_main_trie_no_cache", |b| {
+    c.bench_function("root_hash_account_trie_no_cache", |b| {
         b.iter_batched(
             || trie.clone(),
             |mut trie| trie.root_hash().expect("must hash"),
             BatchSize::SmallInput,
         );
     });
+
+    c.bench_function("root_hash_account_trie_parallel", |b| {
+        b.iter_batched(
+            || trie.clone(),
+            |mut trie| trie.root_hash_parallel().expect("must hash"),
+            BatchSize::SmallInput,
+        );
+    });
 }
 
-fn root_hash_accounts(c: &mut Criterion) {
+fn root_hash_storage(c: &mut Criterion) {
     let multiproof = get_test_mutliproofs();
     let changes = get_change_set();
 
@@ -226,7 +273,7 @@ fn root_hash_accounts(c: &mut Criterion) {
         .gather_tries_for_changes(&changes)
         .expect("gather must succed");
 
-    c.bench_function("root_hash_accounts_insert", |b| {
+    c.bench_function("root_hash_storage_insert", |b| {
         b.iter_batched(
             || get_storage_tries(&changes, &tries),
             |mut storage_tries| {
@@ -236,7 +283,7 @@ fn root_hash_accounts(c: &mut Criterion) {
         );
     });
 
-    c.bench_function("root_hash_accounts_hash_no_recursion_no_cache", |b| {
+    c.bench_function("root_hash_storage_hash", |b| {
         b.iter_batched(
             || get_storage_tries(&changes, &tries),
             |mut storage_tries| {
@@ -291,6 +338,6 @@ criterion_group!(
     gather_nodes,
     root_hash_all,
     root_hash_main_trie,
-    root_hash_accounts
+    root_hash_storage
 );
 criterion_main!(benches);

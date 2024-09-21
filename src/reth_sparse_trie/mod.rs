@@ -74,7 +74,7 @@ where
             Ok(mut tries) => {
                 return {
                     let start = Instant::now();
-                    let root_hash_result = tries.calculate_root_hash(change_set);
+                    let root_hash_result = tries.calculate_root_hash(change_set, true, true);
                     metrics.root_hash_time += start.elapsed();
                     (root_hash_result, metrics)
                 }

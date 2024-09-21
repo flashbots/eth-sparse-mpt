@@ -1,10 +1,9 @@
-use crate::utils::HashMap;
+use crate::utils::{rlp_pointer, HashMap};
 use alloy_primitives::{keccak256, Bytes, B256};
 use alloy_rlp::EMPTY_STRING_CODE;
 use alloy_trie::nodes::word_rlp;
-use arrayvec::ArrayVec;
 use reth_trie::Nibbles;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 pub mod fixed_trie;
 
@@ -983,6 +982,90 @@ impl DiffTrie {
 
         let head = try_get_node_mut(&mut self.nodes, self.head, &empty_path)?;
         Ok(keccak256(&head.rlp_encode()))
+    }
+
+    fn root_hash_parallel_nodes(&self, node: u64) -> Bytes {
+        let node = self.nodes.get(&node).expect("node not found");
+        match &node.kind {
+            DiffTrieNodeKind::Null | DiffTrieNodeKind::Leaf(_) => {
+                return node.rlp_encode();
+            }
+            DiffTrieNodeKind::Extension(extension) => {
+                if node.rlp_pointer.is_none() && extension.child.rlp_pointer.is_none() {
+                    let extension = extension.clone();
+                    let child_node = extension.child.ptr();
+                    let child_bytes = rlp_pointer(self.root_hash_parallel_nodes(child_node));
+                    let mut node = DiffTrieNode {
+                        kind: DiffTrieNodeKind::Extension(extension),
+                        rlp_pointer: None,
+                    };
+                    update_node_with_calculated_dirty_children(
+                        &mut node,
+                        std::iter::once(child_bytes),
+                    );
+                    return node.rlp_encode();
+                }
+                return node.rlp_encode();
+            }
+            DiffTrieNodeKind::Branch(branch_node) => {
+                if node.rlp_pointer.is_none() {
+                    let mut need_elements = Vec::new();
+                    for (_, child) in &branch_node.changed_children {
+                        if let Some(child) = child {
+                            if child.rlp_pointer.is_none() {
+                                need_elements.push(child.ptr());
+                            }
+                        }
+                    }
+
+                    if need_elements.len() == 0 {
+                        return node.rlp_encode();
+                    } else {
+                        let branch = branch_node.clone();
+
+                        let results = if need_elements.len() <= 3 {
+                            let mut res = Vec::with_capacity(need_elements.len());
+                            for child in need_elements.into_iter().rev() {
+                                res.push(rlp_pointer(self.root_hash_parallel_nodes(child)));
+                            }
+                            res
+                        } else {
+                            let res = Arc::new(Mutex::new(Vec::new()));
+                            rayon::scope(|scope| {
+                                for (idx, child) in need_elements.iter().enumerate() {
+                                    let res = res.clone();
+                                    scope.spawn(move |_| {
+                                        let data =
+                                            rlp_pointer(self.root_hash_parallel_nodes(*child));
+                                        res.lock().unwrap().push((idx, data));
+                                    });
+                                }
+                            });
+                            let mut results = res.lock().unwrap().clone();
+                            results.sort_by_key(|(i, _)| *i);
+                            let mut results: Vec<_> = results.into_iter().map(|(_, b)| b).collect();
+                            results.reverse();
+                            results
+                        };
+
+                        let mut node = DiffTrieNode {
+                            kind: DiffTrieNodeKind::Branch(branch),
+                            rlp_pointer: None,
+                        };
+                        update_node_with_calculated_dirty_children(&mut node, results.into_iter());
+                        return node.rlp_encode();
+                    }
+                } else {
+                    return node.rlp_encode();
+                }
+            }
+        }
+    }
+
+    // @todo: change dirty status of the nodes
+    pub fn root_hash_parallel(&mut self) -> Result<B256, ErrSparseNodeNotFound> {
+        let encode = self.root_hash_parallel_nodes(self.head);
+        Ok(keccak256(&encode))
     }
 }
 

@@ -1,4 +1,5 @@
 use alloy_primitives::{keccak256, Bytes, B256};
+use reth_trie::word_rlp;
 use rustc_hash::FxBuildHasher;
 
 // pub type HashMap<K, V> = std::collections::HashMap::<K, V, ahash::RandomState>;
@@ -34,4 +35,12 @@ pub fn reference_trie_hash(data: &[(Vec<u8>, Vec<u8>)]) -> B256 {
 
 pub fn reference_trie_hash2(data: &[(Bytes, Bytes)]) -> B256 {
     triehash::trie_root::<KeccakHasher, _, _, _>(data.to_vec())
+}
+
+pub fn rlp_pointer(rlp_encode: Bytes) -> Bytes {
+    if rlp_encode.len() < 32 {
+        rlp_encode
+    } else {
+        word_rlp(&keccak256(&rlp_encode)).into()
+    }
 }

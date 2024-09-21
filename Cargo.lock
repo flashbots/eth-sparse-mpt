@@ -2408,6 +2408,7 @@ dependencies = [
  "eyre",
  "hash-db",
  "proptest",
+ "rayon",
  "reth",
  "reth-basic-payload-builder",
  "reth-chainspec",

@@ -55,5 +55,7 @@ fn test_insert_and_gather_account_trie() {
     for key in change_set.account_trie_updates {
         gather_result.insert(key.clone(), key).expect("must insert");
     }
-    gather_result.root_hash().expect("must hash");
+    let root_hash = gather_result.root_hash().expect("must hash");
+    let root_hash_parallel = gather_result.root_hash_parallel().expect("must hash");
+    assert_eq!(root_hash, root_hash_parallel);
 }
