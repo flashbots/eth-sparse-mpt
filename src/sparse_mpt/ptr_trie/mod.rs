@@ -89,7 +89,6 @@ impl DiffTrieNode {
     }
 
     pub fn rlp_encode(&self) -> Bytes {
-        // @efficiency consider with_capacity
         let out = match &self.kind {
             DiffTrieNodeKind::Leaf(leaf) => {
                 let (key, value) = (leaf.key(), leaf.value());
