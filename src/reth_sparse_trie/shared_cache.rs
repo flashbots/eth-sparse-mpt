@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 
 use super::change_set::ETHTrieChangeSet;
 use super::hash::EthSparseTries;
@@ -10,7 +10,7 @@ use alloy_trie::Nibbles;
 
 #[derive(Debug, Clone, Default)]
 pub struct RethSparseTrieSharedCache {
-    internal: Arc<Mutex<RethSparseTrieShareCacheInternal>>,
+    internal: Arc<RwLock<RethSparseTrieShareCacheInternal>>,
 }
 
 pub struct StorageTrieInfo {}
@@ -41,7 +41,7 @@ impl RethSparseTrieSharedCache {
         &self,
         change_set: &ETHTrieChangeSet,
     ) -> Result<EthSparseTries, MissingNodes> {
-        let mut internal = self.internal.lock().unwrap();
+        let internal = self.internal.read().unwrap();
         internal.gather_tries_for_changes(change_set)
     }
 
@@ -49,12 +49,19 @@ impl RethSparseTrieSharedCache {
         &self,
         multiproof: MultiProof,
     ) -> Result<(), alloy_rlp::Error> {
-        let mut internal = self.internal.lock().unwrap();
+        let mut internal = self.internal.write().unwrap();
         internal.update_cache_with_fetched_nodes(multiproof)
     }
 
+    pub fn deep_clone(&self) -> Self {
+        let internal = self.clone_inner();
+        Self {
+            internal: Arc::new(RwLock::new(internal)),
+        }
+    }
+
     pub fn clone_inner(&self) -> RethSparseTrieShareCacheInternal {
-        self.internal.lock().unwrap().clone()
+        self.internal.read().unwrap().clone()
     }
 }
 
@@ -66,7 +73,7 @@ pub struct RethSparseTrieShareCacheInternal {
 
 impl RethSparseTrieShareCacheInternal {
     pub fn gather_tries_for_changes(
-        &mut self,
+        &self,
         change_set: &ETHTrieChangeSet,
     ) -> Result<EthSparseTries, MissingNodes> {
         let mut missing_nodes = MissingNodes::default();
@@ -85,14 +92,23 @@ impl RethSparseTrieShareCacheInternal {
         }
 
         for acc_idx in 0..change_set.account_trie_updates.len() {
-            // let start = std::time::Instant::now();
             let account = change_set.account_trie_updates[acc_idx].clone();
             let updates = &change_set.storage_trie_updated_keys[acc_idx];
             let deletes = &change_set.storage_trie_deleted_keys[acc_idx];
-            let storage_trie = self.storage_tries.entry(account.clone()).or_default();
+            let storage_trie = match self.storage_tries.get(&account) {
+                Some(trie) => trie,
+                None => {
+                    let mut nodes = Vec::with_capacity(updates.len() + deletes.len());
+                    for path in updates.iter().chain(deletes) {
+                        let path = Nibbles::unpack(path);
+                        nodes.push(path);
+                    }
+                    missing_nodes.storage_trie_nodes.insert(account, nodes);
+                    continue;
+                }
+            };
             match storage_trie.gather_subtrie(&updates, &deletes) {
                 Ok(storage_trie) => {
-                    // println!("{:?} changes {}, deletes {} elapsed_ns {}", account, updates.len(), deletes.len(), start.elapsed().as_nanos());
                     tries.storage_tries.insert(account, storage_trie);
                 }
                 Err(missing_storage_trie_nodes) => {
