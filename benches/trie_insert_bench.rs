@@ -154,6 +154,20 @@ fn gather_nodes(c: &mut Criterion) {
             black_box(out);
         })
     });
+
+    let inner_cache = shared_cache.clone_inner();
+    c.bench_function("gather_nodes_storage_tries", |b| {
+        b.iter(|| {
+            for acc_idx in 0..changes.account_trie_updates.len() {
+		// let start = std::time::Instant::now();
+		let account = &changes.account_trie_updates[acc_idx];
+		let updates = &changes.storage_trie_updated_keys[acc_idx];
+		let deletes = &changes.storage_trie_deleted_keys[acc_idx];
+		let storage_trie = inner_cache.storage_tries.get(account).expect("must exist");
+		storage_trie.gather_subtrie(&updates, &deletes).expect("must gather");
+            }
+        })
+    });
 }
 
 fn root_hash_all(c: &mut Criterion) {

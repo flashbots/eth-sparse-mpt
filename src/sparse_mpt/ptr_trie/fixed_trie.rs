@@ -8,6 +8,7 @@ use alloy_trie::nodes::{
     TrieNode as AlloyTrieNode,
 };
 use reth_trie::Nibbles;
+use smallvec::SmallVec;
 use std::sync::Arc;
 
 use crate::sparse_mpt::strip_first_nibble_mut;
@@ -54,9 +55,10 @@ impl FixedTrieNode {
             FixedTrieNode::Branch { node, .. } => {
                 DiffTrieNodeKind::Branch(DiffBranchNode {
                     fixed: Some(Arc::clone(node)),
-                    // changed_children: Vec::with_capacity(aux_bits.count_ones() as usize),
+                    // changed_children: Vec::with_capacity(node.child_mask.count_ones() as usize),
                     // changed_children: ArrayVec::new(),
-                    changed_children: Vec::new(),
+                    // changed_children: Vec::new(),
+                    changed_children: SmallVec::new(),
                     aux_bits: node.child_mask,
                 })
             }

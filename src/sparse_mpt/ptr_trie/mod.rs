@@ -3,6 +3,7 @@ use alloy_primitives::{keccak256, Bytes, B256};
 use alloy_rlp::EMPTY_STRING_CODE;
 use alloy_trie::nodes::word_rlp;
 use reth_trie::Nibbles;
+use smallvec::SmallVec;
 use std::sync::{Arc, Mutex};
 
 pub mod fixed_trie;
@@ -51,10 +52,14 @@ impl DiffTrieNode {
         // let mut changed_children = ArrayVec::new();
         // changed_children.push((n1, Some(ptr1)));
         // changed_children.push((n2, Some(ptr2)));
+	let mut changed_children = SmallVec::new();
+        changed_children.push((n1, Some(ptr1)));
+        changed_children.push((n2, Some(ptr2)));
         Self {
             kind: DiffTrieNodeKind::Branch(DiffBranchNode {
                 fixed: None,
-                changed_children: vec![(n1, Some(ptr1)), (n2, Some(ptr2))],
+                // changed_children: vec![(n1, Some(ptr1)), (n2, Some(ptr2))],
+		changed_children,
                 aux_bits: 0,
             }),
             rlp_pointer: None,
@@ -224,7 +229,7 @@ pub struct DiffBranchNode {
     pub fixed: Option<Arc<FixedBranchNode>>,
     /// this must have an element for children that we have in the diff trie
     // pub changed_children: ArrayVec<(u8, Option<DiffChildPtr>), 16>,
-    pub changed_children: Vec<(u8, Option<DiffChildPtr>)>,
+    pub changed_children: SmallVec<[(u8, Option<DiffChildPtr>); 4]>,
     pub aux_bits: u16,
 }
 
