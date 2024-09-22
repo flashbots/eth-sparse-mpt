@@ -1,6 +1,6 @@
 use alloy_primitives::{keccak256, Bytes, B256, U256};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use eth_sparse_mpt::sparse_mpt::SparseTrieNodes;
+use eth_sparse_mpt::sparse_mpt::ptr_trie::DiffTrie;
 use eth_sparse_mpt::utils::{HashMap, KeccakHasher};
 
 // hashing this trie it roughly equivalent to updating the trie for the block
@@ -24,8 +24,8 @@ fn add_elements_bytes(keys: &[Bytes], values: &[Bytes]) -> B256 {
 }
 
 fn add_elements_only_neo_sparse_trie(keys: &[Bytes], values: &[Bytes]) {
-    let mut trie = SparseTrieNodes::empty_trie();
-    trie.reserve(keys.len());
+    let mut trie = DiffTrie::new_empty();
+    // trie.reserve(keys.len());
     for (key, value) in keys.iter().zip(values.iter()) {
         trie.insert(key.clone(), value.clone())
             .expect("can't insert");
@@ -33,7 +33,7 @@ fn add_elements_only_neo_sparse_trie(keys: &[Bytes], values: &[Bytes]) {
 }
 
 fn add_elements_only_neo_sparse_trie_insert_and_hash(keys: &[Bytes], values: &[Bytes]) -> B256 {
-    let mut trie = SparseTrieNodes::empty_trie();
+    let mut trie = DiffTrie::new_empty();
     for (key, value) in keys.iter().zip(values.iter()) {
         trie.insert(key.clone(), value.clone())
             .expect("can't insert");
@@ -41,16 +41,16 @@ fn add_elements_only_neo_sparse_trie_insert_and_hash(keys: &[Bytes], values: &[B
     trie.root_hash().expect("must hash")
 }
 
-fn neo_trie_insert_only(c: &mut Criterion) {
+fn ptr_trie_insert_only(c: &mut Criterion) {
     let (keys, values) = prepare_key_value_data(TRIE_SIZE);
-    c.bench_function(&format!("neo_trie_insert_only_{}", TRIE_SIZE), |b| {
+    c.bench_function(&format!("ptr_trie_insert_only_{}", TRIE_SIZE), |b| {
         b.iter(|| add_elements_only_neo_sparse_trie(&keys, &values))
     });
 }
 
-fn neo_trie_insert_and_hash(c: &mut Criterion) {
+fn ptr_trie_insert_and_hash(c: &mut Criterion) {
     let (keys, values) = prepare_key_value_data(TRIE_SIZE);
-    c.bench_function(&format!("neo_trie_insert_and_hash_{}", TRIE_SIZE), |b| {
+    c.bench_function(&format!("ptr_trie_insert_and_hash_{}", TRIE_SIZE), |b| {
         b.iter(|| add_elements_only_neo_sparse_trie_insert_and_hash(&keys, &values))
     });
     c.bench_function(
@@ -106,7 +106,7 @@ criterion_group!(
     benches,
     hashing,
     cloning,
-    neo_trie_insert_only,
-    neo_trie_insert_and_hash,
+    ptr_trie_insert_only,
+    ptr_trie_insert_and_hash,
 );
 criterion_main!(benches);

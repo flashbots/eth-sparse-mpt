@@ -74,7 +74,7 @@ fn gather_nodes(c: &mut Criterion) {
     let tries = shared_cache.gather_tries_for_changes(&changes).unwrap();
     println!("acc trie len: {}", tries.account_trie.len(),);
 
-    c.bench_function("gather_nodes_clone_acc_trie", |b| {
+    c.bench_function("gather_nodes_clone", |b| {
         b.iter(|| {
             let out = tries.clone();
             black_box(out);
