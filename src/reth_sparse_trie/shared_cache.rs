@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use super::change_set::ETHTrieChangeSet;
 use super::hash::EthSparseTries;
 use super::trie_fetcher::MultiProof;
-use crate::sparse_mpt::{ptr_trie::FixedTrie, SparseTrieError};
+use crate::sparse_mpt::FixedTrie;
 use crate::utils::HashMap;
 use alloy_primitives::Bytes;
 use alloy_trie::Nibbles;
@@ -48,7 +48,7 @@ impl RethSparseTrieSharedCache {
     pub fn update_cache_with_fetched_nodes(
         &self,
         multiproof: MultiProof,
-    ) -> Result<(), SparseTrieError> {
+    ) -> Result<(), alloy_rlp::Error> {
         let mut internal = self.internal.lock().unwrap();
         internal.update_cache_with_fetched_nodes(multiproof)
     }
@@ -113,7 +113,7 @@ impl RethSparseTrieShareCacheInternal {
     pub fn update_cache_with_fetched_nodes(
         &mut self,
         multiproof: MultiProof,
-    ) -> Result<(), SparseTrieError> {
+    ) -> Result<(), alloy_rlp::Error> {
         let mut nodes: Vec<_> = multiproof.account_subtree.into_iter().collect();
         nodes.sort_by_key(|(p, _)| p.clone());
         self.account_trie.add_nodes(&nodes)?;

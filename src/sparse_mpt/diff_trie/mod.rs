@@ -1,26 +1,18 @@
-use crate::utils::{rlp_pointer, HashMap};
+use crate::utils::{
+    encode_branch_node, encode_extension, encode_leaf, encode_len_branch_node,
+    encode_len_extension, encode_len_leaf, encode_null_node, rlp_pointer, HashMap,
+};
+use crate::utils::{extract_prefix_and_suffix, strip_first_nibble_mut};
 use alloy_primitives::{keccak256, Bytes, B256};
-use alloy_rlp::EMPTY_STRING_CODE;
 use alloy_trie::nodes::word_rlp;
 use reth_trie::Nibbles;
 use smallvec::SmallVec;
 use std::sync::{Arc, Mutex};
 
-pub mod fixed_trie;
-
 #[cfg(test)]
-mod diff_trie_tests;
-#[cfg(test)]
-mod fixed_trie_tests;
+mod tests;
 
-use crate::sparse_mpt::{extract_prefix_and_suffix, strip_first_nibble_mut};
-
-use super::{
-    encode_branch_node, encode_extension, encode_leaf, encode_len_branch_node,
-    encode_len_extension, encode_len_leaf,
-};
-
-pub use fixed_trie::*;
+use super::fixed_trie::*;
 
 #[derive(Debug, Clone)]
 pub struct DiffTrieNode {
@@ -49,17 +41,13 @@ impl DiffTrieNode {
     }
 
     pub fn new_branch(n1: u8, ptr1: DiffChildPtr, n2: u8, ptr2: DiffChildPtr) -> Self {
-        // let mut changed_children = ArrayVec::new();
-        // changed_children.push((n1, Some(ptr1)));
-        // changed_children.push((n2, Some(ptr2)));
-	let mut changed_children = SmallVec::new();
+        let mut changed_children = SmallVec::new();
         changed_children.push((n1, Some(ptr1)));
         changed_children.push((n2, Some(ptr2)));
         Self {
             kind: DiffTrieNodeKind::Branch(DiffBranchNode {
                 fixed: None,
-                // changed_children: vec![(n1, Some(ptr1)), (n2, Some(ptr2))],
-		changed_children,
+                changed_children,
                 aux_bits: 0,
             }),
             rlp_pointer: None,
@@ -145,7 +133,9 @@ impl DiffTrieNode {
                 out
             }
             DiffTrieNodeKind::Null => {
-                vec![EMPTY_STRING_CODE]
+                let mut out = Vec::with_capacity(1);
+                encode_null_node(&mut out);
+                out
             }
         };
         Bytes::from(out)
@@ -162,13 +152,13 @@ pub enum DiffTrieNodeKind {
 
 #[derive(Debug, Clone)]
 pub struct DiffLeafNode {
-    fixed: Option<Arc<FixedLeafNode>>,
-    changed_key: Option<Nibbles>,
-    changed_value: Option<Bytes>,
+    pub fixed: Option<Arc<FixedLeafNode>>,
+    pub changed_key: Option<Nibbles>,
+    pub changed_value: Option<Bytes>,
 }
 
 impl DiffLeafNode {
-    fn key(&self) -> &Nibbles {
+    pub fn key(&self) -> &Nibbles {
         if let Some(changed) = &self.changed_key {
             return changed;
         }
@@ -178,7 +168,7 @@ impl DiffLeafNode {
             .expect("leaf incorrect form")
     }
 
-    fn key_mut(&mut self) -> &mut Nibbles {
+    pub fn key_mut(&mut self) -> &mut Nibbles {
         if self.changed_key.is_none() {
             let fixed_key = self
                 .fixed
@@ -190,7 +180,7 @@ impl DiffLeafNode {
         self.changed_key.as_mut().unwrap()
     }
 
-    fn value(&self) -> &Bytes {
+    pub fn value(&self) -> &Bytes {
         if let Some(changed) = &self.changed_value {
             return changed;
         }
@@ -228,13 +218,12 @@ impl DiffChildPtr {
 pub struct DiffBranchNode {
     pub fixed: Option<Arc<FixedBranchNode>>,
     /// this must have an element for children that we have in the diff trie
-    // pub changed_children: ArrayVec<(u8, Option<DiffChildPtr>), 16>,
     pub changed_children: SmallVec<[(u8, Option<DiffChildPtr>); 4]>,
     pub aux_bits: u16,
 }
 
 impl DiffBranchNode {
-    fn has_child(&self, nibble: u8) -> bool {
+    pub fn has_child(&self, nibble: u8) -> bool {
         if let Some((_, changed_child)) = self.changed_children.iter().find(|(n, _)| n == &nibble) {
             return changed_child.is_some();
         }
@@ -244,7 +233,7 @@ impl DiffBranchNode {
         false
     }
 
-    fn get_diff_child_mut(&mut self, nibble: u8) -> Option<&mut DiffChildPtr> {
+    pub fn get_diff_child_mut(&mut self, nibble: u8) -> Option<&mut DiffChildPtr> {
         self.changed_children
             .iter_mut()
             .find(|(n, _)| n == &nibble)
@@ -257,7 +246,7 @@ impl DiffBranchNode {
             .and_then(|(_, c)| c.as_ref())
     }
 
-    fn insert_diff_child(&mut self, nibble: u8, ptr: DiffChildPtr) {
+    pub fn insert_diff_child(&mut self, nibble: u8, ptr: DiffChildPtr) {
         if let Some((_, child)) = self.changed_children.iter_mut().find(|(n, _)| n == &nibble) {
             *child = Some(ptr);
             return;
@@ -265,7 +254,7 @@ impl DiffBranchNode {
         self.changed_children.push((nibble, Some(ptr)));
     }
 
-    fn child_count(&self) -> usize {
+    pub fn child_count(&self) -> usize {
         // @perf
         let mut count = 0;
         for i in 0..16 {
@@ -305,7 +294,7 @@ pub struct DiffExtensionNode {
 }
 
 impl DiffExtensionNode {
-    fn key(&self) -> &Nibbles {
+    pub fn key(&self) -> &Nibbles {
         if let Some(changed) = &self.changed_key {
             return changed;
         }
@@ -315,7 +304,7 @@ impl DiffExtensionNode {
             .expect("ext incorrect form")
     }
 
-    fn key_mut(&mut self) -> &mut Nibbles {
+    pub fn key_mut(&mut self) -> &mut Nibbles {
         if self.changed_key.is_none() {
             let fixed_key = self
                 .fixed
@@ -327,7 +316,7 @@ impl DiffExtensionNode {
         self.changed_key.as_mut().unwrap()
     }
 
-    fn child_with_rlp(&self) -> DiffChildPtr {
+    pub fn child_with_rlp(&self) -> DiffChildPtr {
         if self.child.rlp_pointer.is_none() && self.fixed.is_some() {
             return DiffChildPtr {
                 rlp_pointer: Some(self.fixed.as_ref().map(|f| f.child.clone()).unwrap()),
@@ -375,9 +364,9 @@ pub enum DeletionError {
 
 #[derive(Debug)]
 pub struct NodeCursor {
-    current_node: u64,
-    current_path: Nibbles,
-    path_left: Nibbles,
+    pub current_node: u64,
+    pub current_path: Nibbles,
+    pub path_left: Nibbles,
 }
 
 impl NodeCursor {

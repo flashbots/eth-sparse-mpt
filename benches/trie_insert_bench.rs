@@ -8,7 +8,7 @@ use eth_sparse_mpt::reth_sparse_trie::hash::EthSparseTries;
 use eth_sparse_mpt::reth_sparse_trie::shared_cache::RethSparseTrieShareCacheInternal;
 use eth_sparse_mpt::reth_sparse_trie::trie_fetcher::MultiProof;
 use eth_sparse_mpt::reth_sparse_trie::RethSparseTrieSharedCache;
-use eth_sparse_mpt::sparse_mpt::ptr_trie::{DiffTrie, FixedTrie};
+use eth_sparse_mpt::sparse_mpt::{DiffTrie, FixedTrie};
 
 fn get_test_mutliproofs() -> Vec<MultiProof> {
     let files = [
@@ -159,12 +159,14 @@ fn gather_nodes(c: &mut Criterion) {
     c.bench_function("gather_nodes_storage_tries", |b| {
         b.iter(|| {
             for acc_idx in 0..changes.account_trie_updates.len() {
-		// let start = std::time::Instant::now();
-		let account = &changes.account_trie_updates[acc_idx];
-		let updates = &changes.storage_trie_updated_keys[acc_idx];
-		let deletes = &changes.storage_trie_deleted_keys[acc_idx];
-		let storage_trie = inner_cache.storage_tries.get(account).expect("must exist");
-		storage_trie.gather_subtrie(&updates, &deletes).expect("must gather");
+                // let start = std::time::Instant::now();
+                let account = &changes.account_trie_updates[acc_idx];
+                let updates = &changes.storage_trie_updated_keys[acc_idx];
+                let deletes = &changes.storage_trie_deleted_keys[acc_idx];
+                let storage_trie = inner_cache.storage_tries.get(account).expect("must exist");
+                storage_trie
+                    .gather_subtrie(&updates, &deletes)
+                    .expect("must gather");
             }
         })
     });

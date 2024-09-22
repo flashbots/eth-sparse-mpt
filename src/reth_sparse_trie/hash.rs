@@ -1,5 +1,5 @@
 use super::change_set::ETHTrieChangeSet;
-use crate::sparse_mpt::ptr_trie::DiffTrie;
+use crate::sparse_mpt::DiffTrie;
 use crate::utils::HashMap;
 use alloy_primitives::{Bytes, B256};
 use alloy_rlp::Encodable;
