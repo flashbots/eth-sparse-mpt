@@ -1,4 +1,5 @@
 use super::*;
+use crate::sparse_mpt::*;
 use crate::utils::reference_trie_hash2;
 use crate::utils::HashSet;
 use alloy_primitives::{Bytes, B256};
