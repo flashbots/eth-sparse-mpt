@@ -1,6 +1,6 @@
 use super::*;
 use crate::sparse_mpt::*;
-use crate::utils::reference_trie_hash2;
+use crate::utils::reference_trie_hash;
 use crate::utils::HashSet;
 use alloy_primitives::{Bytes, B256};
 use eyre::Context;
@@ -13,7 +13,7 @@ fn convert_input_to_bytes(input: &[(Vec<u8>, Vec<u8>)]) -> Vec<(Bytes, Bytes)> {
 }
 
 fn compare_impls_with_hashing(data: Vec<(Bytes, Bytes)>, insert_hashing: bool) {
-    let expected = reference_trie_hash2(&data);
+    let expected = reference_trie_hash(&data);
     let mut trie = DiffTrie::new_empty();
     for (key, value) in data {
         trie.insert(key, value).expect("can't insert");
@@ -30,7 +30,7 @@ fn compare_impls_with_hashing(data: Vec<(Bytes, Bytes)>, insert_hashing: bool) {
 }
 
 fn compare_sparse_impl(mut data: Vec<(Bytes, Bytes)>, insert_hashing: bool) {
-    let expected = reference_trie_hash2(&data);
+    let expected = reference_trie_hash(&data);
 
     let (last, data) = if let Some(last) = data.pop() {
         (vec![last], data)
@@ -172,7 +172,7 @@ fn reference_hash_with_removals(data: &[(Bytes, Bytes)], remove: &[Bytes]) -> B2
         .filter(|(k, _)| !removed_keys.contains(k))
         .cloned()
         .collect();
-    reference_trie_hash2(&filtered_data)
+    reference_trie_hash(&filtered_data)
 }
 
 fn compare_with_removals_with_hashing(

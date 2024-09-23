@@ -317,8 +317,21 @@ impl DiffTrie {
                     // @note, this may be too strict as we only need to check that for branches on the bottorm of the trie
                     let child_count = branch.child_count();
                     if child_count == 2 {
-                        // check that other child exist in the trie and return error if its not
-                        // todo!()
+                        // @test add test for this code path
+                        let other_child_nibble = branch
+                            .other_child_nibble(n)
+                            .expect("other child must exist");
+                        if branch.get_diff_child(other_child_nibble).is_none() {
+                            let mut other_child_path = c.current_path.clone();
+                            other_child_path
+                                .as_mut_vec_unchecked()
+                                .last_mut()
+                                .map(|l| *l = other_child_nibble);
+                            return Err(DeletionError::NodeNotFound(ErrSparseNodeNotFound {
+                                path: other_child_path,
+                                ptr: u64::MAX,
+                            }));
+                        }
                     }
                     continue;
                 }

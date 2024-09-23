@@ -249,7 +249,7 @@ impl DiffBranchNode {
     }
 
     pub fn child_count(&self) -> usize {
-        // @perf
+        // @perf try using mask in the branch node
         let mut count = 0;
         for i in 0..16 {
             if self.has_child(i) {
@@ -257,6 +257,18 @@ impl DiffBranchNode {
             }
         }
         count
+    }
+
+    pub fn other_child_nibble(&self, child: u8) -> Option<u8> {
+        for i in 0..16 {
+            if i == child {
+                continue;
+            }
+            if self.has_child(i) {
+                return Some(i);
+            }
+        }
+        None
     }
 
     pub fn other_child_ptr_and_nibble(&self, nibble: u8) -> Option<(u64, u8)> {

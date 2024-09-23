@@ -25,11 +25,7 @@ impl hash_db::Hasher for KeccakHasher {
     }
 }
 
-pub fn reference_trie_hash(data: &[(Vec<u8>, Vec<u8>)]) -> B256 {
-    triehash::trie_root::<KeccakHasher, _, _, _>(data.to_vec())
-}
-
-pub fn reference_trie_hash2(data: &[(Bytes, Bytes)]) -> B256 {
+pub fn reference_trie_hash(data: &[(Bytes, Bytes)]) -> B256 {
     triehash::trie_root::<KeccakHasher, _, _, _>(data.to_vec())
 }
 

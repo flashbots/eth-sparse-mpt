@@ -9,6 +9,7 @@ use alloy_trie::nodes::{
 };
 use reth_trie::Nibbles;
 use smallvec::SmallVec;
+use std::cmp::max;
 use std::sync::Arc;
 
 use crate::utils::strip_first_nibble_mut;
@@ -32,6 +33,16 @@ pub enum FixedTrieNode {
         child_ptrs: Vec<(u8, u64)>,
     },
     Null,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum AddNodeError {
+    #[error("rlp error: {0:?}")]
+    RlpError(#[from] alloy_rlp::Error),
+    /// Its possible when input is not sorted or when it has gaps
+    /// parent must be added before children
+    #[error("Invalid input")]
+    InvalidInput,
 }
 
 impl FixedTrieNode {
@@ -135,6 +146,8 @@ pub struct FixedTrie {
     pub head: u64,
     pub ptrs: u64,
     pub nodes_inserted: HashSet<Nibbles>,
+    // used for preallocations, wrong value will not influence correctness
+    pub height: usize,
 }
 
 impl FixedTrie {
@@ -196,9 +209,7 @@ impl FixedTrie {
     }
 
     /// nodes must be sorted by key
-    pub fn add_nodes(&mut self, nodes: &[(Nibbles, Bytes)]) -> alloy_rlp::Result<()> {
-        // @todo less unwraps, maybe surface an error
-
+    pub fn add_nodes(&mut self, nodes: &[(Nibbles, Bytes)]) -> Result<(), AddNodeError> {
         // when adding empty proof we init try to be empty
         if nodes.is_empty() && self.nodes.is_empty() {
             self.nodes.insert(0, FixedTrieNode::Null);
@@ -225,14 +236,16 @@ impl FixedTrie {
                 AlloyTrieNode::Leaf(node) => FixedTrieNode::Leaf(Arc::new(node.into())),
             };
 
-            // here we go to insert this node
+            // here we find parent to link with this new node
             let mut current_path = Nibbles::new();
             let mut path_left = path.clone();
             let mut current_node = self.head;
 
             let mut parent: Option<u64> = None;
             let mut parent_child_idx: Option<u8> = None;
-            // looking for parent
+
+            // we start from 1 because we are looking for parent in the loop below and we will terminate on the parent
+            let mut height = 1;
             loop {
                 // parent was wound
                 if path_left.is_empty() {
@@ -240,8 +253,9 @@ impl FixedTrie {
                 }
                 let node = match self.nodes.get(&current_node) {
                     Some(node) => node,
-                    None => panic!("current node not found"),
+                    None => return Err(AddNodeError::InvalidInput),
                 };
+                height += 1;
                 match node {
                     FixedTrieNode::Extension { node, child_ptr } => {
                         if path_left.starts_with(&node.key) {
@@ -256,12 +270,15 @@ impl FixedTrie {
                                 break;
                             }
 
-                            current_node = child_ptr.unwrap();
+                            current_node = child_ptr.ok_or(AddNodeError::InvalidInput)?;
                             continue;
                         }
-                        unreachable!()
+                        return Err(AddNodeError::InvalidInput);
                     }
                     FixedTrieNode::Branch { child_ptrs, .. } => {
+                        if path_left.is_empty() {
+                            return Err(AddNodeError::InvalidInput);
+                        }
                         let nibble = strip_first_nibble_mut(&mut path_left);
 
                         parent = Some(current_node);
@@ -272,11 +289,15 @@ impl FixedTrie {
                         }
 
                         current_path.push_unchecked(nibble);
-                        current_node = get_child_ptr(child_ptrs, nibble).unwrap();
+                        current_node =
+                            get_child_ptr(child_ptrs, nibble).ok_or(AddNodeError::InvalidInput)?;
                     }
-                    FixedTrieNode::Null | FixedTrieNode::Leaf(_) => unreachable!(),
+                    FixedTrieNode::Null | FixedTrieNode::Leaf(_) => {
+                        return Err(AddNodeError::InvalidInput)
+                    }
                 }
             }
+            self.height = max(self.height, height);
 
             self.nodes_inserted.insert(path.clone());
             let ptr = get_new_ptr(&mut self.ptrs);
@@ -311,9 +332,8 @@ impl FixedTrie {
     ) -> Result<DiffTrie, Vec<Nibbles>> {
         let mut missing_nodes = Vec::new();
         let mut result = DiffTrie::default();
-        // @todo, this is not right, at least for account map
-        result.nodes = hash_map_with_capacity(self.nodes.len());
-        // result.nodes = HashMap::default();
+        result.nodes =
+            hash_map_with_capacity(self.height * (changed_keys.len() + deleted_keys.len()));
         result.head = self.head;
         result.ptrs = self.ptrs;
 
