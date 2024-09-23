@@ -1,6 +1,5 @@
 use alloy_primitives::B256;
 use change_set::prepare_change_set;
-use reth::tasks::pool::BlockingTaskPool;
 use reth_db_api::database::Database;
 use reth_provider::providers::ConsistentDbView;
 use reth_provider::DatabaseProviderFactory;
@@ -20,7 +19,7 @@ pub use self::local_cache::RethSparseTrieLocalCache;
 pub use self::shared_cache::RethSparseTrieSharedCache;
 
 #[derive(Debug, Clone, Default)]
-pub struct RethSparseTrieMetsics {
+pub struct RethSparseTrieMetrics {
     pub change_set_time: Duration,
     pub gather_nodes_time: Duration,
     pub fetch_iterations: usize,
@@ -39,19 +38,19 @@ pub struct RethSparseTrieMetsics {
 pub fn calculate_root_hash_with_sparse_trie<DB, Provider>(
     consistent_db_view: ConsistentDbView<DB, Provider>,
     outcome: &ExecutionOutcome,
-    blocking_task_pool: Option<BlockingTaskPool>,
+    thread_pool: Option<rayon::ThreadPool>,
     shared_cache: RethSparseTrieSharedCache,
     local_cache: Option<&mut RethSparseTrieLocalCache>,
-) -> (eyre::Result<B256>, RethSparseTrieMetsics)
+) -> (eyre::Result<B256>, RethSparseTrieMetrics)
 where
     DB: Database,
     Provider: DatabaseProviderFactory<DB>,
 {
     // @perf use parallelism and local cache
-    let _ = blocking_task_pool;
+    let _ = thread_pool;
     let _ = local_cache;
 
-    let mut metrics = RethSparseTrieMetsics::default();
+    let mut metrics = RethSparseTrieMetrics::default();
 
     let fetcher = TrieFetcher::new(consistent_db_view);
 

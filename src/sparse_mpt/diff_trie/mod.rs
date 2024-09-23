@@ -4,7 +4,6 @@ use crate::utils::{
 };
 use crate::utils::{extract_prefix_and_suffix, strip_first_nibble_mut};
 use alloy_primitives::{keccak256, Bytes, B256};
-use alloy_trie::nodes::word_rlp;
 use reth_trie::Nibbles;
 use smallvec::SmallVec;
 use std::sync::{Arc, Mutex};
@@ -17,7 +16,7 @@ use super::fixed_trie::*;
 #[derive(Debug, Clone)]
 pub struct DiffTrieNode {
     pub kind: DiffTrieNodeKind,
-    // None -> dirty
+    // None means that node is dirty and hash recalculation is needed
     pub rlp_pointer: Option<Bytes>,
 }
 
@@ -72,11 +71,7 @@ impl DiffTrieNode {
 
         let encode = self.rlp_encode(&[]);
 
-        let rlp_pointer = if encode.len() < 32 {
-            encode
-        } else {
-            word_rlp(&keccak256(&encode)).into()
-        };
+        let rlp_pointer = rlp_pointer(encode);
         self.rlp_pointer = Some(rlp_pointer.clone());
         rlp_pointer
     }
@@ -1045,7 +1040,9 @@ impl DiffTrie {
         rlp_encode
     }
 
-    // @todo: change dirty status of the nodes
+    /// Calculate root hash of the trie in parallel using rayon.
+    /// NOTE: it will not update dirty status of the nodes in the trie
+    /// for now this is not used in a trie but will be necessary if we want to cache paths from previous iterations
     pub fn root_hash_parallel(&mut self) -> Result<B256, ErrSparseNodeNotFound> {
         let encode = self.root_hash_parallel_nodes(self.head);
         Ok(keccak256(&encode))
