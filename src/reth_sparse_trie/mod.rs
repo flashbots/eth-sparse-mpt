@@ -46,7 +46,7 @@ pub fn calculate_root_hash_with_sparse_trie<DB, Provider>(
 ) -> (eyre::Result<B256>, RethSparseTrieMetrics)
 where
     DB: Database,
-    Provider: DatabaseProviderFactory<DB>,
+    Provider: DatabaseProviderFactory<DB> + Send + Sync,
 {
     // @perf use parallelism and local cache
     let _ = thread_pool;
