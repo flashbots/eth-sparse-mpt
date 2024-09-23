@@ -980,19 +980,20 @@ impl DiffTrie {
         Ok(keccak256(&head.rlp_encode(&[])))
     }
 
-    fn root_hash_parallel_nodes(&self, node: u64) -> Bytes {
-        let node = self.nodes.get(&node).expect("node not found");
-        match &node.kind {
-            DiffTrieNodeKind::Null | DiffTrieNodeKind::Leaf(_) => {
-                return node.rlp_encode(&[]);
-            }
+    fn root_hash_parallel_nodes(&self, node_ptr: u64) -> Bytes {
+        let node = self.nodes.get(&node_ptr).expect("node not found");
+        let mut child_rlp = Vec::new();
+        let rlp_encode = match &node.kind {
+            DiffTrieNodeKind::Null | DiffTrieNodeKind::Leaf(_) => node.rlp_encode(&[]),
             DiffTrieNodeKind::Extension(extension) => {
                 if node.rlp_pointer.is_none() && extension.child.rlp_pointer.is_none() {
                     let child_node = extension.child.ptr();
                     let child_bytes = rlp_pointer(self.root_hash_parallel_nodes(child_node));
-                    return node.rlp_encode(&[child_bytes]);
+                    child_rlp.push(child_bytes.clone());
+                    node.rlp_encode(&[child_bytes])
+                } else {
+                    node.rlp_encode(&[])
                 }
-                return node.rlp_encode(&[]);
             }
             DiffTrieNodeKind::Branch(branch_node) => {
                 if node.rlp_pointer.is_none() {
@@ -1006,7 +1007,7 @@ impl DiffTrie {
                     }
 
                     if need_elements.len() == 0 {
-                        return node.rlp_encode(&[]);
+                        node.rlp_encode(&[])
                     } else {
                         let results = if need_elements.len() <= 2 {
                             let mut res = Vec::with_capacity(need_elements.len());
@@ -1015,10 +1016,10 @@ impl DiffTrie {
                             }
                             res
                         } else {
-                            let res = Arc::new(Mutex::new(Vec::with_capacity(need_elements.len())));
+                            let res = Mutex::new(Vec::with_capacity(need_elements.len()));
                             rayon::scope(|scope| {
                                 for (idx, child) in need_elements.iter().enumerate() {
-                                    let res = Arc::clone(&res);
+                                    let res = &res;
                                     scope.spawn(move |_| {
                                         let data =
                                             rlp_pointer(self.root_hash_parallel_nodes(*child));
@@ -1033,13 +1034,15 @@ impl DiffTrie {
                             results.reverse();
                             results
                         };
-                        return node.rlp_encode(&results);
+                        child_rlp.extend_from_slice(&results);
+                        node.rlp_encode(&results)
                     }
                 } else {
-                    return node.rlp_encode(&[]);
+                    node.rlp_encode(&[])
                 }
             }
-        }
+        };
+        rlp_encode
     }
 
     // @todo: change dirty status of the nodes
