@@ -103,6 +103,9 @@ impl RethSparseTrieShareCacheInternal {
                         let path = Nibbles::unpack(path);
                         nodes.push(path);
                     }
+                    if nodes.is_empty() {
+                        nodes.push(Nibbles::new());
+                    }
                     missing_nodes.storage_trie_nodes.insert(account, nodes);
                     continue;
                 }
