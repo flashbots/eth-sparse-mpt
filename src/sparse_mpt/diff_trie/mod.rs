@@ -705,7 +705,7 @@ impl DiffTrie {
                     } else {
                         let results = if need_elements.len() <= 2 {
                             let mut res = Vec::with_capacity(need_elements.len());
-                            for child in need_elements.into_iter().rev() {
+                            for child in need_elements.into_iter() {
                                 res.push(rlp_pointer(self.root_hash_parallel_nodes(child)));
                             }
                             res
@@ -723,9 +723,7 @@ impl DiffTrie {
                             });
                             let mut results = res.lock().unwrap();
                             results.sort_by_key(|(i, _)| *i);
-                            let mut results: Vec<_> =
-                                results.iter().map(|(_, b)| b.clone()).collect();
-                            results.reverse();
+                            let results: Vec<_> = results.iter().map(|(_, b)| b.clone()).collect();
                             results
                         };
                         child_rlp.extend_from_slice(&results);
