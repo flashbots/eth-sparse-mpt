@@ -1,5 +1,6 @@
 use alloy_primitives::B256;
 use change_set::prepare_change_set;
+use reth::tasks::pool::BlockingTaskPool;
 use reth_db_api::database::Database;
 use reth_provider::providers::ConsistentDbView;
 use reth_provider::DatabaseProviderFactory;
@@ -38,7 +39,8 @@ pub struct RethSparseTrieMetrics {
 pub fn calculate_root_hash_with_sparse_trie<DB, Provider>(
     consistent_db_view: ConsistentDbView<DB, Provider>,
     outcome: &ExecutionOutcome,
-    thread_pool: Option<rayon::ThreadPool>,
+    // thread_pool: Option<rayon::ThreadPool>,
+    thread_pool: Option<BlockingTaskPool>,
     shared_cache: RethSparseTrieSharedCache,
     local_cache: Option<&mut RethSparseTrieLocalCache>,
 ) -> (eyre::Result<B256>, RethSparseTrieMetrics)
