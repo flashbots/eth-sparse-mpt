@@ -70,7 +70,7 @@ impl DiffTrieNode {
             return rlp_pointer.clone();
         }
 
-        let encode = self.rlp_encode();
+        let encode = self.rlp_encode(&[]);
 
         let rlp_pointer = if encode.len() < 32 {
             encode
@@ -81,7 +81,7 @@ impl DiffTrieNode {
         rlp_pointer
     }
 
-    pub fn rlp_encode(&self) -> Bytes {
+    pub fn rlp_encode(&self, dirty_children: &[Bytes]) -> Bytes {
         let out = match &self.kind {
             DiffTrieNodeKind::Leaf(leaf) => {
                 let (key, value) = (leaf.key(), leaf.value());
@@ -96,7 +96,8 @@ impl DiffTrieNode {
                     &ext.child
                         .rlp_pointer
                         .as_ref()
-                        .expect("ext node rlp: child rlp must be computed"),
+			.or_else(|| dirty_children.first())
+                        .expect("ext node rlp: child rlp must be computed or provided as a dirty children arg"),
                 );
                 let len = encode_len_extension(key, child_rlp);
                 let mut out = Vec::with_capacity(len);
@@ -112,6 +113,7 @@ impl DiffTrieNode {
                         }
                     }
                 }
+                let mut dirty_children = dirty_children.iter();
                 for (n, child) in &branch.changed_children {
                     let child = if let Some(child) = child {
                         child
@@ -123,8 +125,9 @@ impl DiffTrieNode {
                         child
                             .rlp_pointer
                             .as_ref()
+			    .or_else(|| dirty_children.next())
                             .map(|c| c.as_ref())
-                            .expect("branch node rlp: child rlp must be computed"),
+                            .expect("branch node rlp: child rlp must be computed or provided as dirty children arg"),
                     );
                 }
                 let len = encode_len_branch_node(&child_rlp_pointers);
@@ -974,31 +977,22 @@ impl DiffTrie {
         assert_eq!(result_stack.len(), 1);
 
         let head = try_get_node_mut(&mut self.nodes, self.head, &empty_path)?;
-        Ok(keccak256(&head.rlp_encode()))
+        Ok(keccak256(&head.rlp_encode(&[])))
     }
 
     fn root_hash_parallel_nodes(&self, node: u64) -> Bytes {
         let node = self.nodes.get(&node).expect("node not found");
         match &node.kind {
             DiffTrieNodeKind::Null | DiffTrieNodeKind::Leaf(_) => {
-                return node.rlp_encode();
+                return node.rlp_encode(&[]);
             }
             DiffTrieNodeKind::Extension(extension) => {
                 if node.rlp_pointer.is_none() && extension.child.rlp_pointer.is_none() {
-                    let extension = extension.clone();
                     let child_node = extension.child.ptr();
                     let child_bytes = rlp_pointer(self.root_hash_parallel_nodes(child_node));
-                    let mut node = DiffTrieNode {
-                        kind: DiffTrieNodeKind::Extension(extension),
-                        rlp_pointer: None,
-                    };
-                    update_node_with_calculated_dirty_children(
-                        &mut node,
-                        std::iter::once(child_bytes),
-                    );
-                    return node.rlp_encode();
+                    return node.rlp_encode(&[child_bytes]);
                 }
-                return node.rlp_encode();
+                return node.rlp_encode(&[]);
             }
             DiffTrieNodeKind::Branch(branch_node) => {
                 if node.rlp_pointer.is_none() {
@@ -1012,21 +1006,19 @@ impl DiffTrie {
                     }
 
                     if need_elements.len() == 0 {
-                        return node.rlp_encode();
+                        return node.rlp_encode(&[]);
                     } else {
-                        let branch = branch_node.clone();
-
-                        let results = if need_elements.len() <= 3 {
+                        let results = if need_elements.len() <= 2 {
                             let mut res = Vec::with_capacity(need_elements.len());
                             for child in need_elements.into_iter().rev() {
                                 res.push(rlp_pointer(self.root_hash_parallel_nodes(child)));
                             }
                             res
                         } else {
-                            let res = Arc::new(Mutex::new(Vec::new()));
+                            let res = Arc::new(Mutex::new(Vec::with_capacity(need_elements.len())));
                             rayon::scope(|scope| {
                                 for (idx, child) in need_elements.iter().enumerate() {
-                                    let res = res.clone();
+                                    let res = Arc::clone(&res);
                                     scope.spawn(move |_| {
                                         let data =
                                             rlp_pointer(self.root_hash_parallel_nodes(*child));
@@ -1034,22 +1026,17 @@ impl DiffTrie {
                                     });
                                 }
                             });
-                            let mut results = res.lock().unwrap().clone();
+                            let mut results = res.lock().unwrap();
                             results.sort_by_key(|(i, _)| *i);
-                            let mut results: Vec<_> = results.into_iter().map(|(_, b)| b).collect();
+                            let mut results: Vec<_> =
+                                results.iter().map(|(_, b)| b.clone()).collect();
                             results.reverse();
                             results
                         };
-
-                        let mut node = DiffTrieNode {
-                            kind: DiffTrieNodeKind::Branch(branch),
-                            rlp_pointer: None,
-                        };
-                        update_node_with_calculated_dirty_children(&mut node, results.into_iter());
-                        return node.rlp_encode();
+                        return node.rlp_encode(&results);
                     }
                 } else {
-                    return node.rlp_encode();
+                    return node.rlp_encode(&[]);
                 }
             }
         }
