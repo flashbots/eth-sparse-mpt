@@ -4,7 +4,7 @@ use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion
 use eth_sparse_mpt::reth_sparse_trie::change_set::ETHTrieChangeSet;
 use eth_sparse_mpt::reth_sparse_trie::hash::EthSparseTries;
 use eth_sparse_mpt::reth_sparse_trie::shared_cache::RethSparseTrieShareCacheInternal;
-use eth_sparse_mpt::reth_sparse_trie::RethSparseTrieSharedCache;
+use eth_sparse_mpt::reth_sparse_trie::SparseTrieSharedCache;
 use eth_sparse_mpt::sparse_mpt::{DiffTrie, FixedTrie};
 use eth_sparse_mpt::utils::{get_test_change_set, get_test_mutliproofs};
 
@@ -44,7 +44,7 @@ fn gather_nodes(c: &mut Criterion) {
     let multiproof = get_test_mutliproofs();
     let changes = get_test_change_set();
 
-    let shared_cache = RethSparseTrieSharedCache::default();
+    let shared_cache = SparseTrieSharedCache::default();
     for p in multiproof {
         shared_cache
             .update_cache_with_fetched_nodes(p)
@@ -156,7 +156,7 @@ fn root_hash_all(c: &mut Criterion) {
     let multiproof = get_test_mutliproofs();
     let changes = get_test_change_set();
 
-    let shared_cache = RethSparseTrieSharedCache::default();
+    let shared_cache = SparseTrieSharedCache::default();
     for p in multiproof {
         shared_cache
             .update_cache_with_fetched_nodes(p)
@@ -219,7 +219,7 @@ fn root_hash_main_trie(c: &mut Criterion) {
     let multiproof = get_test_mutliproofs();
     let changes = get_test_change_set();
 
-    let shared_cache = RethSparseTrieSharedCache::default();
+    let shared_cache = SparseTrieSharedCache::default();
     for p in multiproof {
         shared_cache
             .update_cache_with_fetched_nodes(p)
@@ -258,7 +258,7 @@ fn root_hash_storage(c: &mut Criterion) {
     let multiproof = get_test_mutliproofs();
     let changes = get_test_change_set();
 
-    let shared_cache = RethSparseTrieSharedCache::default();
+    let shared_cache = SparseTrieSharedCache::default();
     for p in multiproof {
         shared_cache
             .update_cache_with_fetched_nodes(p)

@@ -19,9 +19,9 @@ use super::shared_cache::MissingNodes;
 #[derive(Debug, thiserror::Error)]
 pub enum FetchNodeError {
     #[error("Provider error {0:?}")]
-    ProviderError(#[from] ProviderError),
+    Provider(#[from] ProviderError),
     #[error("Provider error {0:?}")]
-    StateProofError(#[from] StateProofError),
+    StateProof(#[from] StateProofError),
 }
 
 #[serde_as]

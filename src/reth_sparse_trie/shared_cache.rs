@@ -8,8 +8,10 @@ use crate::utils::HashMap;
 use alloy_primitives::Bytes;
 use alloy_trie::Nibbles;
 
+/// SparseTrieSharedCache is a storage for fetched parts of the ethereum tries
+/// It should be created once for each parent block and can be shared with a different threads.
 #[derive(Debug, Clone, Default)]
-pub struct RethSparseTrieSharedCache {
+pub struct SparseTrieSharedCache {
     internal: Arc<RwLock<RethSparseTrieShareCacheInternal>>,
 }
 
@@ -36,7 +38,7 @@ impl MissingNodes {
     }
 }
 
-impl RethSparseTrieSharedCache {
+impl SparseTrieSharedCache {
     pub fn gather_tries_for_changes(
         &self,
         change_set: &ETHTrieChangeSet,

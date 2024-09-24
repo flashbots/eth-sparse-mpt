@@ -10,7 +10,6 @@ use std::time::Instant;
 
 pub mod change_set;
 pub mod hash;
-pub mod local_cache;
 pub mod shared_cache;
 pub mod trie_fetcher;
 
@@ -18,8 +17,7 @@ use crate::sparse_mpt::AddNodeError;
 
 use self::trie_fetcher::*;
 
-pub use self::local_cache::RethSparseTrieLocalCache;
-pub use self::shared_cache::RethSparseTrieSharedCache;
+pub use self::shared_cache::SparseTrieSharedCache;
 
 #[derive(Debug, Clone, Default)]
 pub struct SparseTrieMetrics {
@@ -36,9 +34,9 @@ pub struct SparseTrieMetrics {
 #[derive(Debug, thiserror::Error)]
 pub enum SparseTrieError {
     #[error("Error while computing root hash: {0:?}")]
-    RootHashError(RootHashError),
+    RootHash(RootHashError),
     #[error("Error while fetching trie nodes from db: {0:?}")]
-    FetchNodeError(FetchNodeError),
+    FetchNode(FetchNodeError),
     #[error("Error while updated shared cache: {0:?}")]
     FailedToUpdateSharedCache(AddNodeError),
     /// This might indicate bug in the library
@@ -48,23 +46,17 @@ pub enum SparseTrieError {
 }
 
 /// Calculate root hash for the given outcome on top of the block defined by consistent_db_view.
-/// * shared_cache should be created once for each parent block and it stores fethed pieces of the trie
-/// * blocking_task_pool - implemenation will use parallelism if set (not implemented right now)
-/// * local_cache - implemenation will use is to cache some operations.
-///   It should be owned by one thread that computes root hash in a loop.
+/// * shared_cache should be created once for each parent block and it stores fethed parts of the trie
+/// It uses rayon for parallelism and the thread pool should be configured from outside.
 pub fn calculate_root_hash_with_sparse_trie<DB, Provider>(
     consistent_db_view: ConsistentDbView<DB, Provider>,
     outcome: &ExecutionOutcome,
-    shared_cache: RethSparseTrieSharedCache,
-    local_cache: Option<&mut RethSparseTrieLocalCache>,
+    shared_cache: SparseTrieSharedCache,
 ) -> (Result<B256, SparseTrieError>, SparseTrieMetrics)
 where
     DB: Database,
     Provider: DatabaseProviderFactory<DB> + Send + Sync,
 {
-    // @perf use parallelism and local cache
-    let _ = local_cache;
-
     let mut metrics = SparseTrieMetrics::default();
 
     let fetcher = TrieFetcher::new(consistent_db_view);
@@ -91,7 +83,7 @@ where
                     let root_hash_result = tries.calculate_root_hash(change_set, true, true);
                     metrics.root_hash_time += start.elapsed();
                     (
-                        root_hash_result.map_err(|err| SparseTrieError::RootHashError(err)),
+                        root_hash_result.map_err(|err| SparseTrieError::RootHash(err)),
                         metrics,
                     )
                 }
@@ -102,7 +94,7 @@ where
         let start = Instant::now();
         let multiproof = match fetcher.fetch_missing_nodes(missing_nodes) {
             Ok(ok) => ok,
-            Err(err) => return (Err(SparseTrieError::FetchNodeError(err)), metrics),
+            Err(err) => return (Err(SparseTrieError::FetchNode(err)), metrics),
         };
         metrics.fetch_iterations += 1;
 

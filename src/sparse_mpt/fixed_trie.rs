@@ -38,7 +38,7 @@ pub enum FixedTrieNode {
 #[derive(Debug, thiserror::Error)]
 pub enum AddNodeError {
     #[error("rlp error: {0:?}")]
-    RlpError(#[from] alloy_rlp::Error),
+    Rlp(#[from] alloy_rlp::Error),
     /// Its possible when input is not sorted or when it has gaps
     /// parent must be added before children
     #[error("Invalid input")]
