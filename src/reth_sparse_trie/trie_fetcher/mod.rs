@@ -9,13 +9,16 @@ use reth_trie::proof::Proof;
 use reth_trie::{MultiProof as RethMultiProof, StorageMultiProof as RethStorageMultiProof};
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use serde::{Deserialize, Serialize};
+use serde_with::{serde_as, Seq};
 use std::collections::HashMap as StdHashMap;
 
 use super::shared_cache::MissingNodes;
 
+#[serde_as]
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct MultiProof {
     pub account_subtree: Vec<(Nibbles, Bytes)>,
+    #[serde_as(as = "Seq<(_, _)>")]
     pub storages: HashMap<B256, StorageMultiProof>,
 }
 

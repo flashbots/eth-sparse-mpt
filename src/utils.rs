@@ -5,28 +5,14 @@ use alloy_trie::Nibbles;
 use reth_trie::word_rlp;
 use rustc_hash::FxBuildHasher;
 
+use crate::reth_sparse_trie::change_set::ETHTrieChangeSet;
+use crate::reth_sparse_trie::trie_fetcher::MultiProof;
+
 pub type HashMap<K, V> = std::collections::HashMap<K, V, FxBuildHasher>;
 pub type HashSet<K> = std::collections::HashSet<K, FxBuildHasher>;
 
 pub fn hash_map_with_capacity<K, V>(capacity: usize) -> HashMap<K, V> {
     HashMap::with_capacity_and_hasher(capacity, FxBuildHasher)
-}
-
-#[derive(Debug)]
-pub struct KeccakHasher {}
-
-impl hash_db::Hasher for KeccakHasher {
-    type Out = B256;
-    type StdHasher = ahash::AHasher;
-    const LENGTH: usize = 32;
-
-    fn hash(x: &[u8]) -> Self::Out {
-        keccak256(x)
-    }
-}
-
-pub fn reference_trie_hash(data: &[(Bytes, Bytes)]) -> B256 {
-    triehash::trie_root::<KeccakHasher, _, _, _>(data.to_vec())
 }
 
 pub fn rlp_pointer(rlp_encode: Bytes) -> Bytes {
@@ -124,4 +110,41 @@ pub fn encode_len_branch_node(child_rlp_pointers: &[Option<&[u8]>; 16]) -> usize
 
 pub fn encode_null_node(out: &mut Vec<u8>) {
     out.push(EMPTY_STRING_CODE)
+}
+
+// test utils
+
+#[derive(Debug)]
+pub struct KeccakHasher {}
+
+impl hash_db::Hasher for KeccakHasher {
+    type Out = B256;
+    type StdHasher = ahash::AHasher;
+    const LENGTH: usize = 32;
+
+    fn hash(x: &[u8]) -> Self::Out {
+        keccak256(x)
+    }
+}
+
+pub fn reference_trie_hash(data: &[(Bytes, Bytes)]) -> B256 {
+    triehash::trie_root::<KeccakHasher, _, _, _>(data.to_vec())
+}
+
+pub fn get_test_mutliproofs() -> Vec<MultiProof> {
+    let files = [
+        "./test_data/mutliproof_0.json",
+        "./test_data/mutliproof_1.json",
+    ];
+    let mut result = Vec::new();
+    for file in files {
+        let data = std::fs::read_to_string(file).expect("reading multiproof");
+        result.push(serde_json::from_str(&data).expect("parsing multiproof"));
+    }
+    result
+}
+
+pub fn get_test_change_set() -> ETHTrieChangeSet {
+    let data = std::fs::read_to_string("./test_data/changeset.json").expect("reading changeset");
+    serde_json::from_str(&data).expect("parsing changeset")
 }

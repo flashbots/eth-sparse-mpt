@@ -465,27 +465,7 @@ fn get_child_ptr(child_ptrs: &[(u8, u64)], nibble: u8) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::reth_sparse_trie::change_set::ETHTrieChangeSet;
-    use crate::reth_sparse_trie::trie_fetcher::MultiProof;
-    use std::fs::read_to_string;
-
-    fn get_test_mutliproofs() -> Vec<MultiProof> {
-        let files = [
-            "./test_data/mutliproof_0.json",
-            "./test_data/mutliproof_1.json",
-        ];
-        let mut result = Vec::new();
-        for file in files {
-            let data = read_to_string(file).expect("reading multiproof");
-            result.push(serde_json::from_str(&data).expect("parsing multiproof"));
-        }
-        result
-    }
-
-    fn get_change_set() -> ETHTrieChangeSet {
-        let data = read_to_string("./test_data/changeset.json").expect("reading changeset");
-        serde_json::from_str(&data).expect("parsing changeset")
-    }
+    use crate::utils::{get_test_change_set, get_test_mutliproofs};
 
     #[test]
     fn test_insert_and_gather_account_trie() {
@@ -510,7 +490,7 @@ mod tests {
         assert_eq!(fixed_trie.nodes.len(), account_proof.len());
         assert_eq!(fixed_trie.nodes_inserted.len(), account_proof.len());
 
-        let change_set = get_change_set();
+        let change_set = get_test_change_set();
         let mut gather_result = fixed_trie
             .gather_subtrie(
                 &change_set.account_trie_updates,
