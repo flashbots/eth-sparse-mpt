@@ -1,6 +1,3 @@
-#[cfg(test)]
-mod toy_trie_tests;
-
 use crate::utils::{hash_map_with_capacity, HashMap, HashSet};
 use alloy_primitives::{Bytes, B256};
 use alloy_trie::Nibbles;
