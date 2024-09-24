@@ -3,6 +3,8 @@ use alloy_primitives::{Bytes, B256};
 use alloy_trie::Nibbles;
 use rayon::prelude::*;
 use reth_db_api::database::Database;
+use reth_errors::ProviderError;
+use reth_execution_errors::trie::StateProofError;
 use reth_provider::providers::ConsistentDbView;
 use reth_provider::DatabaseProviderFactory;
 use reth_trie::proof::Proof;
@@ -13,6 +15,14 @@ use serde_with::{serde_as, Seq};
 use std::collections::HashMap as StdHashMap;
 
 use super::shared_cache::MissingNodes;
+
+#[derive(Debug, thiserror::Error)]
+pub enum FetchNodeError {
+    #[error("Provider error {0:?}")]
+    ProviderError(#[from] ProviderError),
+    #[error("Provider error {0:?}")]
+    StateProofError(#[from] StateProofError),
+}
 
 #[serde_as]
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
@@ -81,12 +91,15 @@ where
         Self { consistent_db_view }
     }
 
-    pub fn fetch_missing_nodes(&self, missing_nodes: MissingNodes) -> eyre::Result<MultiProof> {
+    pub fn fetch_missing_nodes(
+        &self,
+        missing_nodes: MissingNodes,
+    ) -> Result<MultiProof, FetchNodeError> {
         let (targets, all_requested_accounts) = get_proof_targets(missing_nodes);
 
         let proofs: Vec<_> = targets
             .into_par_iter()
-            .map(|targets| -> eyre::Result<MultiProof> {
+            .map(|targets| -> Result<MultiProof, FetchNodeError> {
                 let provider = self.consistent_db_view.provider_ro()?;
 
                 let proof = Proof::new(

@@ -3,7 +3,7 @@ use alloy_rlp::{length_of_length, BufMut, Encodable, Header, EMPTY_STRING_CODE};
 use alloy_trie::nodes::{ExtensionNodeRef, LeafNodeRef};
 use alloy_trie::Nibbles;
 use reth_trie::word_rlp;
-use rustc_hash::FxBuildHasher;
+use rustc_hash::{FxBuildHasher, FxHasher};
 
 use crate::reth_sparse_trie::change_set::ETHTrieChangeSet;
 use crate::reth_sparse_trie::trie_fetcher::MultiProof;
@@ -119,7 +119,7 @@ pub struct KeccakHasher {}
 
 impl hash_db::Hasher for KeccakHasher {
     type Out = B256;
-    type StdHasher = ahash::AHasher;
+    type StdHasher = FxHasher;
     const LENGTH: usize = 32;
 
     fn hash(x: &[u8]) -> Self::Out {
