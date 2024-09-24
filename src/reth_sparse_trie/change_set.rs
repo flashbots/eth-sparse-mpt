@@ -10,7 +10,7 @@ pub struct ETHTrieChangeSet {
     pub account_trie_updates: Vec<Bytes>,
     pub account_trie_updates_info: Vec<AccountInfo>,
 
-    // for each acctount_trie_updates
+    // for each account_trie_updates
     pub storage_trie_updated_keys: Vec<Vec<Bytes>>,
     pub storage_trie_updated_values: Vec<Vec<Bytes>>,
     pub storage_trie_deleted_keys: Vec<Vec<Bytes>>,
