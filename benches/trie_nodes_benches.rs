@@ -1,4 +1,5 @@
 use alloy_primitives::{keccak256, Bytes, B256, U256};
+use alloy_rlp::Encodable;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use eth_sparse_mpt::sparse_mpt::DiffTrie;
 use eth_sparse_mpt::utils::{HashMap, KeccakHasher};
@@ -97,6 +98,17 @@ fn cloning(c: &mut Criterion) {
         |b| {
             b.iter(|| {
                 black_box(data.clone());
+            })
+        },
+    );
+
+    c.bench_function(
+        &format!("hashing_{}_branch_node_size_elements", TRIE_SIZE),
+        |b| {
+	    let mut buff = Vec::new();
+            b.iter(|| {
+		data.encode(&mut buff);
+                black_box(keccak256(&buff));
             })
         },
     );
