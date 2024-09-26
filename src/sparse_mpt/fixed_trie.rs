@@ -66,9 +66,6 @@ impl FixedTrieNode {
             FixedTrieNode::Branch { node, .. } => {
                 DiffTrieNodeKind::Branch(DiffBranchNode {
                     fixed: Some(Arc::clone(node)),
-                    // changed_children: Vec::with_capacity(node.child_mask.count_ones() as usize),
-                    // changed_children: ArrayVec::new(),
-                    // changed_children: Vec::new(),
                     changed_children: SmallVec::new(),
                     aux_bits: node.child_mask,
                 })
