@@ -1,5 +1,6 @@
-use alloy_primitives::B256;
+use alloy_primitives::{Address, B256};
 use change_set::prepare_change_set;
+use change_set::prepare_change_set_for_prefetch;
 use hash::RootHashError;
 use reth_db_api::database::Database;
 use reth_provider::providers::ConsistentDbView;
@@ -36,13 +37,59 @@ pub enum SparseTrieError {
     #[error("Error while computing root hash: {0:?}")]
     RootHash(RootHashError),
     #[error("Error while fetching trie nodes from db: {0:?}")]
-    FetchNode(FetchNodeError),
+    FetchNode(#[from] FetchNodeError),
     #[error("Error while updated shared cache: {0:?}")]
-    FailedToUpdateSharedCache(AddNodeError),
+    FailedToUpdateSharedCache(#[from] AddNodeError),
     /// This might indicate bug in the library
     /// or incorrect underlying storage (e.g. when deletes can't be applyed to the trie because it does not have that keys)
     #[error("Failed to fetch data")]
     FailedToFetchData,
+}
+
+#[derive(Debug)]
+pub struct ChangedAccountData {
+    pub address: Address,
+    pub account_deleted: bool,
+    /// (slot, deleted)
+    pub slots: Vec<(B256, bool)>,
+}
+
+impl ChangedAccountData {
+    pub fn new(address: Address, account_deleted: bool) -> Self {
+        Self {
+            address,
+            account_deleted,
+            slots: Vec::new(),
+        }
+    }
+}
+
+/// Prefetches data
+pub fn prefetch_tries_for_accounts<'a, DB, Provider>(
+    consistent_db_view: ConsistentDbView<DB, Provider>,
+    shared_cache: SparseTrieSharedCache,
+    changed_data: impl Iterator<Item = &'a ChangedAccountData>,
+) -> Result<(), SparseTrieError>
+where
+    DB: Database,
+    Provider: DatabaseProviderFactory<DB> + Send + Sync,
+{
+    let change_set = prepare_change_set_for_prefetch(changed_data);
+
+    let fetcher = TrieFetcher::new(consistent_db_view);
+
+    for _ in 0..3 {
+        let gather_result = shared_cache.gather_tries_for_changes(&change_set);
+
+        let missing_nodes = match gather_result {
+            Ok(_) => return Ok(()),
+            Err(missing_nodes) => missing_nodes,
+        };
+        let multiproof = fetcher.fetch_missing_nodes(missing_nodes)?;
+        shared_cache.update_cache_with_fetched_nodes(multiproof)?;
+    }
+
+    Err(SparseTrieError::FailedToFetchData)
 }
 
 /// Calculate root hash for the given outcome on top of the block defined by consistent_db_view.

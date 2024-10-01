@@ -63,13 +63,11 @@ impl FixedTrieNode {
                     },
                 })
             }
-            FixedTrieNode::Branch { node, .. } => {
-                DiffTrieNodeKind::Branch(DiffBranchNode {
-                    fixed: Some(Arc::clone(node)),
-                    changed_children: SmallVec::new(),
-                    aux_bits: node.child_mask,
-                })
-            }
+            FixedTrieNode::Branch { node, .. } => DiffTrieNodeKind::Branch(DiffBranchNode {
+                fixed: Some(Arc::clone(node)),
+                changed_children: SmallVec::new(),
+                aux_bits: node.child_mask,
+            }),
             FixedTrieNode::Null => DiffTrieNodeKind::Null,
         };
         DiffTrieNode {

@@ -105,9 +105,9 @@ fn cloning(c: &mut Criterion) {
     c.bench_function(
         &format!("hashing_{}_branch_node_size_elements", TRIE_SIZE),
         |b| {
-	    let mut buff = Vec::new();
+            let mut buff = Vec::new();
             b.iter(|| {
-		data.encode(&mut buff);
+                data.encode(&mut buff);
                 black_box(keccak256(&buff));
             })
         },

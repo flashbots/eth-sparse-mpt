@@ -8,4 +8,7 @@ pub mod reth_sparse_trie;
 pub mod sparse_mpt;
 pub mod utils;
 
-pub use reth_sparse_trie::{calculate_root_hash_with_sparse_trie, SparseTrieSharedCache};
+pub use reth_sparse_trie::{
+    calculate_root_hash_with_sparse_trie, prefetch_tries_for_accounts, ChangedAccountData,
+    SparseTrieSharedCache,
+};

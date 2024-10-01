@@ -212,7 +212,7 @@ impl DiffChildPtr {
 pub struct DiffBranchNode {
     pub fixed: Option<Arc<FixedBranchNode>>,
     /// this must have an element for children that we have in the diff trie
-    pub changed_children: SmallVec<[(u8, Option<DiffChildPtr>); 4]>,
+    pub changed_children: SmallVec<[(u8, Option<DiffChildPtr>); 16]>,
     pub aux_bits: u16,
 }
 
