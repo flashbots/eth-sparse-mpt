@@ -8,6 +8,8 @@ use alloy_trie::nodes::{
     TrieNode as AlloyTrieNode,
 };
 use reth_trie::Nibbles;
+use serde::{Deserialize, Serialize};
+use serde_with::{serde_as, Seq};
 use smallvec::SmallVec;
 use std::cmp::max;
 use std::sync::Arc;
@@ -21,7 +23,7 @@ use super::{
     DiffTrieNodeKind,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum FixedTrieNode {
     Leaf(Arc<FixedLeafNode>),
     Extension {
@@ -77,7 +79,7 @@ impl FixedTrieNode {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FixedLeafNode {
     pub key: Nibbles,
     pub value: Bytes,
@@ -92,7 +94,7 @@ impl From<AlloyLeafNode> for FixedLeafNode {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FixedBranchNode {
     pub children: Box<[Option<Bytes>; 16]>,
     pub child_mask: u16,
@@ -120,7 +122,7 @@ impl From<AlloyBranchNode> for FixedBranchNode {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FixedExtensionNode {
     pub key: Nibbles,
     pub child: Bytes,
@@ -135,8 +137,10 @@ impl From<AlloyExtensionNode> for FixedExtensionNode {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[serde_as]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FixedTrie {
+    #[serde_as(as = "Seq<(_, _)>")]
     pub nodes: HashMap<u64, FixedTrieNode>,
     pub head: u64,
     pub ptrs: u64,

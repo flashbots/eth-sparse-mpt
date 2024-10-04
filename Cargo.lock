@@ -1311,6 +1311,7 @@ dependencies = [
  "criterion",
  "eyre",
  "hash-db",
+ "rand 0.8.5",
  "rayon",
  "reth-db-api",
  "reth-errors",

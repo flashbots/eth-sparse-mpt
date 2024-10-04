@@ -2,6 +2,8 @@ use crate::utils::{extract_prefix_and_suffix, strip_first_nibble_mut};
 use crate::utils::{rlp_pointer, HashMap};
 use alloy_primitives::{keccak256, Bytes, B256};
 use reth_trie::Nibbles;
+use serde::{Deserialize, Serialize};
+use serde_with::{serde_as, Seq};
 use std::sync::Mutex;
 
 mod nodes;
@@ -11,8 +13,10 @@ mod tests;
 
 pub use nodes::*;
 
-#[derive(Debug, Clone, Default)]
+#[serde_as]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DiffTrie {
+    #[serde_as(as = "Seq<(_, _)>")]
     pub nodes: HashMap<u64, DiffTrieNode>,
     pub head: u64,
     pub ptrs: u64,
@@ -194,11 +198,11 @@ impl DiffTrie {
 
                     let branch_other_child = if !key2.is_empty() {
                         let new_ext_ptr = get_new_ptr(&mut self.ptrs);
-                        let new_ext = DiffTrieNode::new_ext(key2, extension.child_with_rlp());
+                        let new_ext = DiffTrieNode::new_ext(key2, extension.child.clone());
                         new_nodes.push((new_ext_ptr, new_ext));
                         DiffChildPtr::new(new_ext_ptr)
                     } else {
-                        extension.child_with_rlp()
+                        extension.child.clone()
                     };
 
                     let branch_node = DiffTrieNode::new_branch(
@@ -436,7 +440,7 @@ impl DiffTrie {
                             ext_key.push(*child_nibble);
                             ext_key.extend_from_slice_unchecked(ext_below.key());
 
-                            ext_above.child = ext_below.child_with_rlp();
+                            ext_above.child = ext_below.child.clone();
                         }
                         (
                             DiffTrieNodeKind::Extension(ext_above),
@@ -743,6 +747,16 @@ impl DiffTrie {
     pub fn root_hash_parallel(&mut self) -> Result<B256, ErrSparseNodeNotFound> {
         let encode = self.root_hash_parallel_nodes(self.head);
         Ok(keccak256(&encode))
+    }
+
+    pub fn print(&self) {
+        println!("head {}", self.head);
+        println!("ptrs {}", self.ptrs);
+        let mut keys = self.nodes.keys().collect::<Vec<_>>();
+        keys.sort();
+        for key in keys {
+            println!("node {} {:#?}", key, self.nodes.get(key).unwrap());
+        }
     }
 }
 

@@ -4,9 +4,11 @@ use alloy_trie::nodes::{ExtensionNodeRef, LeafNodeRef};
 use alloy_trie::Nibbles;
 use reth_trie::word_rlp;
 use rustc_hash::{FxBuildHasher, FxHasher};
+use serde::{Deserialize, Serialize};
 
 use crate::reth_sparse_trie::change_set::ETHTrieChangeSet;
 use crate::reth_sparse_trie::trie_fetcher::MultiProof;
+use crate::sparse_mpt::DiffTrie;
 
 pub type HashMap<K, V> = std::collections::HashMap<K, V, FxBuildHasher>;
 pub type HashSet<K> = std::collections::HashSet<K, FxBuildHasher>;
@@ -147,4 +149,20 @@ pub fn get_test_mutliproofs() -> Vec<MultiProof> {
 pub fn get_test_change_set() -> ETHTrieChangeSet {
     let data = std::fs::read_to_string("./test_data/changeset.json").expect("reading changeset");
     serde_json::from_str(&data).expect("parsing changeset")
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoredFailureCase {
+    pub trie: DiffTrie,
+    pub updated_keys: Vec<Bytes>,
+    pub updated_values: Vec<Bytes>,
+    pub deleted_keys: Vec<Bytes>,
+}
+
+impl StoredFailureCase {
+    pub fn load(path: &str) -> StoredFailureCase {
+        // raed from file
+        let data = std::fs::read_to_string(path).expect("reading stored failure case");
+        serde_json::from_str(&data).expect("parsing stored failure case")
+    }
 }

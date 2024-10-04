@@ -2,8 +2,11 @@ use super::*;
 use crate::sparse_mpt::*;
 use crate::utils::reference_trie_hash;
 use crate::utils::HashSet;
+use crate::utils::StoredFailureCase;
 use alloy_primitives::{Bytes, B256};
 use eyre::Context;
+use rand::seq::SliceRandom;
+use rand::SeedableRng;
 
 fn convert_input_to_bytes(input: &[(Vec<u8>, Vec<u8>)]) -> Vec<(Bytes, Bytes)> {
     input
@@ -460,4 +463,40 @@ fn check_correct_gather_for_orphan_of_and_orphan() {
     let remove = &[vec![0x00, 0x00, 0x00], vec![0x09, 0x00, 0x00]];
 
     compare_with_removals(add, remove).unwrap();
+}
+
+#[test]
+fn known_failure_case_0() {
+    let input = StoredFailureCase::load("./test_data/failure_case_0.json");
+
+    let mut prev_value = None;
+    for i in 0..10 {
+        let mut input = input.clone();
+
+        {
+            let mut rng = rand::rngs::SmallRng::seed_from_u64(i);
+            let mut key_values: Vec<_> = input
+                .updated_keys
+                .into_iter()
+                .zip(input.updated_values)
+                .collect();
+            key_values.shuffle(&mut rng);
+            (input.updated_keys, input.updated_values) = key_values.into_iter().unzip();
+        }
+
+        // random shuffle input
+
+        for (key, value) in input.updated_keys.into_iter().zip(input.updated_values) {
+            input.trie.insert(key, value).expect("must insert");
+        }
+        for key in input.deleted_keys {
+            input.trie.delete(key).expect("must delete");
+        }
+        let hash = input.trie.root_hash().expect("must hash");
+        if prev_value.is_none() {
+            prev_value = Some(hash);
+        } else {
+            assert_eq!(prev_value, Some(hash), "seed:{}", i);
+        }
+    }
 }

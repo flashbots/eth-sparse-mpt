@@ -4,12 +4,13 @@ use crate::utils::{
 };
 use alloy_primitives::Bytes;
 use reth_trie::Nibbles;
+use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 use std::sync::Arc;
 
 use super::super::fixed_trie::*;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiffTrieNode {
     pub kind: DiffTrieNodeKind,
     // None means that node is dirty and hash recalculation is needed
@@ -36,7 +37,13 @@ impl DiffTrieNode {
     }
 
     pub fn new_branch(n1: u8, ptr1: DiffChildPtr, n2: u8, ptr2: DiffChildPtr) -> Self {
+        assert!(n1 != n2);
         let mut changed_children = SmallVec::new();
+        let (n1, ptr1, n2, ptr2) = if n1 > n2 {
+            (n2, ptr2, n1, ptr1)
+        } else {
+            (n1, ptr1, n2, ptr2)
+        };
         changed_children.push((n1, Some(ptr1)));
         changed_children.push((n2, Some(ptr2)));
         Self {
@@ -136,7 +143,7 @@ impl DiffTrieNode {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DiffTrieNodeKind {
     Leaf(DiffLeafNode),
     Extension(DiffExtensionNode),
@@ -144,7 +151,7 @@ pub enum DiffTrieNodeKind {
     Null,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiffLeafNode {
     pub fixed: Option<Arc<FixedLeafNode>>,
     pub changed_key: Option<Nibbles>,
@@ -185,7 +192,7 @@ impl DiffLeafNode {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiffChildPtr {
     pub rlp_pointer: Option<Bytes>,
     pub ptr: Option<u64>,
@@ -208,7 +215,7 @@ impl DiffChildPtr {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiffBranchNode {
     pub fixed: Option<Arc<FixedBranchNode>>,
     /// this must have an element for children that we have in the diff trie
@@ -245,7 +252,7 @@ impl DiffBranchNode {
             *child = Some(ptr);
             return;
         }
-        self.changed_children.push((nibble, Some(ptr)));
+        self.push_changed_children_sorted(nibble, Some(ptr));
     }
 
     pub fn child_count(&self) -> usize {
@@ -288,11 +295,20 @@ impl DiffBranchNode {
             *child = None;
             return;
         }
-        self.changed_children.push((nibble, None));
+        self.push_changed_children_sorted(nibble, None);
+    }
+
+    fn push_changed_children_sorted(&mut self, nibble: u8, value: Option<DiffChildPtr>) {
+        let pos = self.changed_children.iter().position(|(n, _)| n > &nibble);
+        if let Some(pos) = pos {
+            self.changed_children.insert(pos, (nibble, value));
+        } else {
+            self.changed_children.push((nibble, value));
+        }
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiffExtensionNode {
     pub fixed: Option<Arc<FixedExtensionNode>>,
     pub changed_key: Option<Nibbles>,
@@ -322,13 +338,4 @@ impl DiffExtensionNode {
         self.changed_key.as_mut().unwrap()
     }
 
-    pub fn child_with_rlp(&self) -> DiffChildPtr {
-        if self.child.rlp_pointer.is_none() && self.fixed.is_some() {
-            return DiffChildPtr {
-                rlp_pointer: Some(self.fixed.as_ref().map(|f| f.child.clone()).unwrap()),
-                ptr: self.child.ptr,
-            };
-        }
-        self.child.clone()
-    }
 }
