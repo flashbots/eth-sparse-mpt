@@ -7,6 +7,7 @@ use alloy_primitives::{Bytes, B256};
 use eyre::Context;
 use rand::seq::SliceRandom;
 use rand::SeedableRng;
+use proptest::prelude::*;
 
 fn convert_input_to_bytes(input: &[(Vec<u8>, Vec<u8>)]) -> Vec<(Bytes, Bytes)> {
     input
@@ -498,5 +499,48 @@ fn known_failure_case_0() {
         } else {
             assert_eq!(prev_value, Some(hash), "seed:{}", i);
         }
+    }
+}
+
+
+proptest! {
+    #[test]
+    fn proptest_random_insert_any_values(key_values in any::<Vec<([u8; 3], Vec<u8>)>>()) {
+        let data: Vec<_> = key_values.into_iter().map(|(k, v)| (k.to_vec(), v)).collect();
+        compare_impls(&data);
+    }
+
+
+    #[test]
+    fn proptest_random_insert_big_values(key_values in any::<Vec<([u8; 3], [u8; 64])>>()) {
+        let data: Vec<_> = key_values.into_iter().map(|(k, v)| (k.to_vec(), v.to_vec())).collect();
+        compare_impls(&data);
+    }
+
+    #[test]
+    fn proptest_random_insert_small_values(key_values in any::<Vec<([u8; 3], [u8; 3])>>()) {
+        let data: Vec<_> = key_values.into_iter().map(|(k, v)| (k.to_vec(), v.to_vec())).collect();
+        compare_impls(&data);
+    }
+
+    #[test]
+    fn proptest_random_insert_big_keys(key_values in any::<Vec<([u8; 32], Vec<u8>)>>()) {
+        let data: Vec<_> = key_values.into_iter().map(|(k, v)| (k.to_vec(), v)).collect();
+        compare_impls(&data);
+    }
+
+
+    #[test]
+    fn proptest_random_insert_remove_any_values(key_values in any::<Vec<(([u8; 3], bool), Vec<u8>)>>()) {
+        let mut keys_to_remove_set = HashSet::default();
+        let mut keys_to_remove = Vec::new();
+        let data: Vec<_> = key_values.into_iter().map(|((k, remove), v)| {
+            if remove && !keys_to_remove_set.contains(&k) {
+                keys_to_remove_set.insert(k.clone());
+                keys_to_remove.push(k.to_vec());
+            }
+            (k.to_vec(), v)
+        }).collect();
+        compare_with_removals(&data, &keys_to_remove).unwrap()
     }
 }
