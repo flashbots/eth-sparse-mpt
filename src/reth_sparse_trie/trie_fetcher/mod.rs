@@ -8,7 +8,7 @@ use reth_execution_errors::trie::StateProofError;
 use reth_provider::providers::ConsistentDbView;
 use reth_provider::DatabaseProviderFactory;
 use reth_trie::proof::Proof;
-use reth_trie::{MultiProof as RethMultiProof, StorageMultiProof as RethStorageMultiProof};
+use reth_trie::{MultiProof as RethMultiProof, EMPTY_ROOT_HASH};
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, Seq};
@@ -43,38 +43,11 @@ impl MultiProof {
     }
 }
 
-impl From<RethMultiProof> for MultiProof {
-    fn from(reth_proof: RethMultiProof) -> Self {
-        let mut account_subtree = Vec::with_capacity(reth_proof.account_subtree.len());
-        for (k, v) in reth_proof.account_subtree {
-            account_subtree.push((k, v));
-        }
-        account_subtree.sort_by_key(|a| a.0.clone());
-        let mut storages = hash_map_with_capacity(reth_proof.storages.len());
-        for (k, v) in reth_proof.storages {
-            storages.insert(k, v.into());
-        }
-        Self {
-            account_subtree,
-            storages,
-        }
-    }
-}
-
+/// StorageMultiProof will be empty if and only if account storage is empty
+/// otherwise it must have at least one node
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct StorageMultiProof {
     pub subtree: Vec<(Nibbles, Bytes)>,
-}
-
-impl From<RethStorageMultiProof> for StorageMultiProof {
-    fn from(reth_proof: RethStorageMultiProof) -> Self {
-        let mut subtree = Vec::with_capacity(reth_proof.subtree.len());
-        for (k, v) in reth_proof.subtree {
-            subtree.push((k, v));
-        }
-        subtree.sort_by_key(|a| a.0.clone());
-        Self { subtree }
-    }
 }
 
 #[derive(Debug)]
@@ -107,7 +80,8 @@ where
                     DatabaseHashedCursorFactory::new(provider.tx_ref()),
                 );
 
-                let result: MultiProof = proof.with_targets(targets).multiproof()?.into();
+                let reth_multiproof = proof.with_targets(targets).multiproof()?;
+                let result = convert_reth_multiproof(reth_multiproof, &all_requested_accounts);
                 Ok(result)
             })
             .collect();
@@ -201,4 +175,36 @@ fn merge_results(
             .or_insert_with(|| StorageMultiProof::default());
     }
     result
+}
+
+fn convert_reth_multiproof(
+    reth_proof: RethMultiProof,
+    all_requested_accounts: &HashSet<B256>,
+) -> MultiProof {
+    let mut account_subtree = Vec::with_capacity(reth_proof.account_subtree.len());
+    for (k, v) in reth_proof.account_subtree {
+        account_subtree.push((k, v));
+    }
+    account_subtree.sort_by_key(|a| a.0.clone());
+    let mut storages = hash_map_with_capacity(reth_proof.storages.len());
+    for (k, reth_storage_proof) in reth_proof.storages {
+        if !all_requested_accounts.contains(&k) {
+            continue;
+        }
+        if reth_storage_proof.subtree.is_empty() {
+            assert_eq!(reth_storage_proof.root, EMPTY_ROOT_HASH);
+        }
+        let mut subtree = Vec::with_capacity(reth_storage_proof.subtree.len());
+
+        for (k, v) in reth_storage_proof.subtree {
+            subtree.push((k, v));
+        }
+        subtree.sort_by_key(|a| a.0.clone());
+        let v = StorageMultiProof { subtree };
+        storages.insert(k, v);
+    }
+    MultiProof {
+        account_subtree,
+        storages,
+    }
 }

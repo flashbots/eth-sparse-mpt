@@ -208,6 +208,7 @@ impl FixedTrie {
     }
 
     /// nodes must be sorted by key
+    /// nodes must be empty if and only if trie is empty
     pub fn add_nodes(&mut self, nodes: &[(Nibbles, Bytes)]) -> Result<(), AddNodeError> {
         // when adding empty proof we init try to be empty
         if nodes.is_empty() && self.nodes.is_empty() {

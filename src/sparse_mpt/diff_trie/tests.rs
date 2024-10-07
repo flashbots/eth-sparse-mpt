@@ -5,9 +5,9 @@ use crate::utils::HashSet;
 use crate::utils::StoredFailureCase;
 use alloy_primitives::{Bytes, B256};
 use eyre::Context;
+use proptest::prelude::*;
 use rand::seq::SliceRandom;
 use rand::SeedableRng;
-use proptest::prelude::*;
 
 fn convert_input_to_bytes(input: &[(Vec<u8>, Vec<u8>)]) -> Vec<(Bytes, Bytes)> {
     input
@@ -72,7 +72,9 @@ fn compare_sparse_impl(mut data: Vec<(Bytes, Bytes)>, insert_hashing: bool) {
     let got = gathered_trie.root_hash().expect("can't hash gathered trie");
     assert_eq!(got, expected);
 
-    let got_parallel = gathered_trie.root_hash_parallel().expect("can't hash gathered trie");
+    let got_parallel = gathered_trie
+        .root_hash_parallel()
+        .expect("can't hash gathered trie");
     assert_eq!(got_parallel, expected);
 }
 
@@ -525,7 +527,6 @@ fn known_failure_case_0() {
         }
     }
 }
-
 
 proptest! {
     #[test]

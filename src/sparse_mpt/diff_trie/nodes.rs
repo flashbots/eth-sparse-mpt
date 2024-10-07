@@ -337,5 +337,4 @@ impl DiffExtensionNode {
         }
         self.changed_key.as_mut().unwrap()
     }
-
 }
