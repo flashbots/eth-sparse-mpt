@@ -116,7 +116,7 @@ impl DiffTrie {
         loop {
             let node = try_get_node_mut(&mut self.nodes, c.current_node, &c.current_path)?;
             match &mut node.kind {
-                DiffTrieNodeKind::Null => {
+                DiffTrieNodeKind::EmptyRoot => {
                     let new_node = DiffTrieNode::new_leaf(c.path_left, value);
                     *node = new_node;
                     break;
@@ -269,7 +269,7 @@ impl DiffTrie {
                 .map_err(|e| DeletionError::NodeNotFound(e))?;
 
             match &mut node.kind {
-                DiffTrieNodeKind::Null => {
+                DiffTrieNodeKind::EmptyRoot => {
                     return Err(DeletionError::KeyNotFound);
                 }
                 DiffTrieNodeKind::Leaf(leaf) => {
@@ -359,7 +359,7 @@ impl DiffTrie {
                     let node = try_get_node_mut(&mut self.nodes, current_node, &Nibbles::new())
                         .expect("nodes must exist when walking back");
                     let should_remove = match &mut node.kind {
-                        DiffTrieNodeKind::Null => unreachable!(),
+                        DiffTrieNodeKind::EmptyRoot => unreachable!(),
                         DiffTrieNodeKind::Leaf(_) => {
                             deletion_result = NodeDeletionResult::NodeDeleted;
                             true
@@ -578,7 +578,7 @@ impl DiffTrie {
                         });
                         child_below.rlp_pointer = None;
                     }
-                    DiffTrieNodeKind::Null => unreachable!(),
+                    DiffTrieNodeKind::EmptyRoot => unreachable!(),
                 };
                 let ptr = get_new_ptr(&mut self.ptrs);
                 self.head = ptr;
@@ -610,7 +610,7 @@ impl DiffTrie {
             let node = try_get_node_mut(&mut self.nodes, current_node, &empty_path)?;
 
             match &mut node.kind {
-                DiffTrieNodeKind::Null | DiffTrieNodeKind::Leaf(_) => {
+                DiffTrieNodeKind::EmptyRoot | DiffTrieNodeKind::Leaf(_) => {
                     result_stack.push(node.rlp_pointer_slow());
                 }
                 DiffTrieNodeKind::Extension(extension) => {
@@ -682,7 +682,7 @@ impl DiffTrie {
         let node = self.nodes.get(&node_ptr).expect("node not found");
         let mut child_rlp = Vec::new();
         let rlp_encode = match &node.kind {
-            DiffTrieNodeKind::Null | DiffTrieNodeKind::Leaf(_) => node.rlp_encode(&[]),
+            DiffTrieNodeKind::EmptyRoot | DiffTrieNodeKind::Leaf(_) => node.rlp_encode(&[]),
             DiffTrieNodeKind::Extension(extension) => {
                 if node.rlp_pointer.is_none() && extension.child.rlp_pointer.is_none() {
                     let child_node = extension.child.ptr();
