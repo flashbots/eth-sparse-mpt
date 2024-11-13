@@ -34,7 +34,7 @@ pub enum FixedTrieNode {
         node: Arc<FixedBranchNode>,
         child_ptrs: Vec<(u8, u64)>,
     },
-    Null,
+    EmptyRoot,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -70,7 +70,7 @@ impl FixedTrieNode {
                 changed_children: SmallVec::new(),
                 aux_bits: node.child_mask,
             }),
-            FixedTrieNode::Null => DiffTrieNodeKind::Null,
+            FixedTrieNode::EmptyRoot => DiffTrieNodeKind::EmptyRoot,
         };
         DiffTrieNode {
             kind,
@@ -111,7 +111,8 @@ impl From<AlloyBranchNode> for FixedBranchNode {
                 let rlp_data = stack_iter
                     .next()
                     .expect("stack must be the same size as mask");
-                children[index as usize] = Some(rlp_data.into());
+                // @Pending: Eval replacing Bytes for ArrayVec to avoid the copy or dig deeper into low-level.
+                children[index as usize] = Some(Bytes::copy_from_slice(rlp_data.as_ref()));
                 child_mask |= 1 << index
             }
         }
@@ -132,7 +133,7 @@ impl From<AlloyExtensionNode> for FixedExtensionNode {
     fn from(alloy_extension_node: AlloyExtensionNode) -> Self {
         Self {
             key: alloy_extension_node.key,
-            child: alloy_extension_node.child.into(),
+            child: Bytes::copy_from_slice(alloy_extension_node.child.as_ref()),
         }
     }
 }
@@ -199,7 +200,7 @@ impl FixedTrie {
                         child_ptrs,
                     }
                 }
-                DiffTrieNodeKind::Null => FixedTrieNode::Null,
+                DiffTrieNodeKind::EmptyRoot => FixedTrieNode::EmptyRoot,
             };
             result.nodes.insert(*ptr, fixed_node);
         }
@@ -212,7 +213,7 @@ impl FixedTrie {
     pub fn add_nodes(&mut self, nodes: &[(Nibbles, Bytes)]) -> Result<(), AddNodeError> {
         // when adding empty proof we init try to be empty
         if nodes.is_empty() && self.nodes.is_empty() {
-            self.nodes.insert(0, FixedTrieNode::Null);
+            self.nodes.insert(0, FixedTrieNode::EmptyRoot);
             self.head = 0;
             self.ptrs = 0;
             self.nodes_inserted.insert(Nibbles::new());
@@ -234,6 +235,7 @@ impl FixedTrie {
                     child_ptr: None,
                 },
                 AlloyTrieNode::Leaf(node) => FixedTrieNode::Leaf(Arc::new(node.into())),
+                AlloyTrieNode::EmptyRoot => FixedTrieNode::EmptyRoot,
             };
 
             // here we find parent to link with this new node
@@ -292,7 +294,7 @@ impl FixedTrie {
                         current_node =
                             get_child_ptr(child_ptrs, nibble).ok_or(AddNodeError::InvalidInput)?;
                     }
-                    FixedTrieNode::Null | FixedTrieNode::Leaf(_) => {
+                    FixedTrieNode::EmptyRoot | FixedTrieNode::Leaf(_) => {
                         return Err(AddNodeError::InvalidInput)
                     }
                 }
@@ -314,7 +316,7 @@ impl FixedTrie {
                         assert!(get_child_ptr(child_ptrs, child_nibble).is_none());
                         child_ptrs.push((child_nibble, ptr));
                     }
-                    FixedTrieNode::Null | FixedTrieNode::Leaf(_) => unreachable!(),
+                    FixedTrieNode::EmptyRoot | FixedTrieNode::Leaf(_) => unreachable!(),
                 }
             } else {
                 assert_eq!(self.nodes.len(), 1);
@@ -365,7 +367,7 @@ impl FixedTrie {
                     .entry(c.current_node)
                     .or_insert_with(|| node.create_diff_node());
                 match (node, &mut diff_node.kind) {
-                    (FixedTrieNode::Null, DiffTrieNodeKind::Null) => {
+                    (FixedTrieNode::EmptyRoot, DiffTrieNodeKind::EmptyRoot) => {
                         // this is empty trie, we have everything to return
                         return Ok(result);
                     }

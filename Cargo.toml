@@ -13,27 +13,27 @@ rayon = "1.10.0"
 smallvec = "1.13.2"
 
 # reth
-reth-db-api = { git = "https://github.com/paradigmxyz/reth", tag = "v1.0.6" }
-reth-errors = { git = "https://github.com/paradigmxyz/reth", tag = "v1.0.6" }
-reth-execution-errors = { git = "https://github.com/paradigmxyz/reth", tag = "v1.0.6" }
-reth-trie = { git = "https://github.com/paradigmxyz/reth", tag = "v1.0.6" }
-reth-trie-db = { git = "https://github.com/paradigmxyz/reth", tag = "v1.0.6" }
-reth-provider = { git = "https://github.com/paradigmxyz/reth", tag = "v1.0.6" }
+reth-db-api = { git = "https://github.com/paradigmxyz/reth", tag = "v1.1.1" }
+reth-errors = { git = "https://github.com/paradigmxyz/reth", tag = "v1.1.1" }
+reth-execution-errors = { git = "https://github.com/paradigmxyz/reth", tag = "v1.1.1" }
+reth-trie = { git = "https://github.com/paradigmxyz/reth", tag = "v1.1.1" }
+reth-trie-db = { git = "https://github.com/paradigmxyz/reth", tag = "v1.1.1" }
+reth-provider = { git = "https://github.com/paradigmxyz/reth", tag = "v1.1.1" }
 
 # revm
-revm = { version = "14.0.0", features = [
+revm = { version = "17.0.0", features = [
     "std",
     "secp256k1",
     "blst",
 ], default-features = false }
-revm-primitives = { version = "9.0.0", features = [
+revm-primitives = { version = "13.0.0", features = [
     "std",
 ], default-features = false }
 
 # alloy
-alloy-primitives = { version = "0.8.0", default-features = false, features = ["asm-keccak"] }
+alloy-primitives = { version = "0.8.9", default-features = false, features = ["asm-keccak"] }
 alloy-rlp = "0.3.4"
-alloy-trie = { version = "0.5", default-features = false }
+alloy-trie = { version = "0.7", default-features = false }
 
 # test only dependencies but included here to be accessible from benches/
 hash-db = "0.15.2"

@@ -20,7 +20,7 @@ pub struct DiffTrieNode {
 impl DiffTrieNode {
     pub fn new_null() -> Self {
         Self {
-            kind: DiffTrieNodeKind::Null,
+            kind: DiffTrieNodeKind::EmptyRoot,
             rlp_pointer: None,
         }
     }
@@ -133,7 +133,7 @@ impl DiffTrieNode {
                 encode_branch_node(&child_rlp_pointers, &mut out);
                 out
             }
-            DiffTrieNodeKind::Null => {
+            DiffTrieNodeKind::EmptyRoot => {
                 let mut out = Vec::with_capacity(1);
                 encode_null_node(&mut out);
                 out
@@ -148,7 +148,7 @@ pub enum DiffTrieNodeKind {
     Leaf(DiffLeafNode),
     Extension(DiffExtensionNode),
     Branch(DiffBranchNode),
-    Null,
+    EmptyRoot,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
